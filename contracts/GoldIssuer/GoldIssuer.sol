@@ -187,7 +187,13 @@ contract GoldIssuer is AccessControl {
         public
         view
         onlyAvailablePair(_taIn, _taOut)
-        returns (uint256, int256, int256)
+        returns (
+            uint256 amtOut,
+            int256 rateIn,
+            int256 rateOut,
+            uint256 tInUpdatedAt,
+            uint256 tOutUpdatedAt
+        )
     {
         // Precision adjustment: adjust _amtIn to (taInDecimal + taOutDecimal) for calculation
         _amtIn = _amtIn * (10 ** uint256(IERC20Metadata(_taOut).decimals()));
@@ -199,15 +205,21 @@ contract GoldIssuer is AccessControl {
             priceFeedForToken[_taOut]
         );
 
-        (, int256 rateIn, , , ) = pfIn.latestRoundData();
-        (, int256 rateOut, , , ) = pfOut.latestRoundData();
+        (, rateIn, , tInUpdatedAt, ) = pfIn.latestRoundData();
+        (, rateOut, , tOutUpdatedAt, ) = pfOut.latestRoundData();
 
-        uint256 amtOut = (_amtIn * uint256(rateIn) * (10 ** pfOut.decimals())) /
+        amtOut =
+            (_amtIn * uint256(rateIn) * (10 ** pfOut.decimals())) /
             (uint256(rateOut) * (10 ** pfIn.decimals()));
 
         // Adjust back the precision: adjust amtOut to taOutDecimal
         amtOut = amtOut / (10 ** uint256(IERC20Metadata(_taIn).decimals()));
-        return (amtOut, rateIn, rateOut);
+
+        // Truncate decimals (only 8 digits are retained)
+        uint256 adjDecimals = 10 ** (IERC20Metadata(_taOut).decimals() - 8);
+        amtOut = (amtOut / adjDecimals) * adjDecimals;
+
+        return (amtOut, rateIn, rateOut, tInUpdatedAt, tOutUpdatedAt);
     }
 
     event tokenIssued(
@@ -247,18 +259,19 @@ contract GoldIssuer is AccessControl {
             revert InsufficientBalance(_taIn, msg.sender, _amtIn);
 
         uint256 fee = (_amtIn * feeBps) / 10000;
-        uint256 amtInAfterFee = _amtIn - fee;
         cumulatedFees[_taIn] += fee;
 
-        (uint256 amtOut, int256 rateIn, int256 rateOut) = getAmountOut(
+        (uint256 amtOut, int256 rateIn, int256 rateOut, , ) = getAmountOut(
             _taIn,
             _taOut,
-            amtInAfterFee
+            _amtIn - fee // deduct fee from amtIn
         );
 
-        uint256 reserveOut = getReserve(_taOut);
-        if (reserveOut < amtOut)
-            revert InsufficientReserve(_taOut, amtOut, reserveOut);
+        {
+            uint256 reserveOut = getReserve(_taOut);
+            if (reserveOut < amtOut)
+                revert InsufficientReserve(_taOut, amtOut, reserveOut);
+        }
         if (amtOut < _amtOutMin)
             revert SlippageTooLow(_taOut, amtOut, _amtOutMin);
 
