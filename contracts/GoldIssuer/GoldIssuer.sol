@@ -182,7 +182,8 @@ contract GoldIssuer is AccessControl {
     function getAmountOut(
         address _taIn,
         address _taOut,
-        uint256 _amtIn
+        uint256 _amtIn,
+        uint256 _retainingDecimals
     )
         public
         view
@@ -215,8 +216,9 @@ contract GoldIssuer is AccessControl {
         // Adjust back the precision: adjust amtOut to taOutDecimal
         amtOut = amtOut / (10 ** uint256(IERC20Metadata(_taIn).decimals()));
 
-        // Truncate decimals (only 8 digits are retained)
-        uint256 adjDecimals = 10 ** (IERC20Metadata(_taOut).decimals() - 8);
+        // Truncate decimals
+        uint256 adjDecimals = 10 **
+            (IERC20Metadata(_taOut).decimals() - _retainingDecimals);
         amtOut = (amtOut / adjDecimals) * adjDecimals;
 
         return (amtOut, rateIn, rateOut, tInUpdatedAt, tOutUpdatedAt);
@@ -253,7 +255,8 @@ contract GoldIssuer is AccessControl {
         address _taIn,
         address _taOut,
         uint256 _amtIn,
-        uint256 _amtOutMin
+        uint256 _amtOutMin,
+        uint256 _retainingDecimals
     ) external onlyWhitelisted whenNotPaused onlyAvailablePair(_taIn, _taOut) {
         if (IERC20(_taIn).balanceOf(msg.sender) < _amtIn)
             revert InsufficientBalance(_taIn, msg.sender, _amtIn);
@@ -264,7 +267,8 @@ contract GoldIssuer is AccessControl {
         (uint256 amtOut, int256 rateIn, int256 rateOut, , ) = getAmountOut(
             _taIn,
             _taOut,
-            _amtIn - fee // deduct fee from amtIn
+            _amtIn - fee, // deduct fee from amtIn
+            _retainingDecimals
         );
 
         {
