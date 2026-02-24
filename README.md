@@ -7,7 +7,7 @@
 
 ## GoldIssuer
 
-- GoldIssuer.sol(sha256 : 2e1cc3f77b50de00ba14fbae660e79bbd044af2ded21be3d1e7f7924fc6dabbd)
+- GoldIssuer.sol(sha256 : a25cf9e180d7118dca43152e92bad4ab5df6b1e011618ecb6de850e242d2143d)
 
 ## RedeemLock
 

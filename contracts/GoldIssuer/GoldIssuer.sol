@@ -179,6 +179,44 @@ contract GoldIssuer is AccessControl {
         emit PriceFeedForTokenSet(_token, _priceFeed);
     }
 
+    struct QuoteData {
+        uint256 amtIn;
+        uint256 amtOut;
+        uint256 fee;
+        int256 rateIn;
+        int256 rateOut;
+        uint256 tInUpdatedAt;
+        uint256 tOutUpdatedAt;
+    }
+
+    function getAmountIn(
+        address _taIn,
+        address _taOut,
+        uint256 _amtOut,
+        uint256 _retainingDecimals
+    )
+        public
+        view
+        onlyAvailablePair(_taIn, _taOut)
+        returns (QuoteData memory data)
+    {
+        uint256 amtIn = 0;
+        uint256 high = IERC20(_taIn).totalSupply();
+
+        while (amtIn < high) {
+            uint256 mid = (amtIn + high) / 2;
+            data = getAmountOut(_taIn, _taOut, mid, _retainingDecimals);
+
+            if (data.amtOut < _amtOut) {
+                amtIn = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        data = getAmountOut(_taIn, _taOut, amtIn, _retainingDecimals);
+    }
+
     function getAmountOut(
         address _taIn,
         address _taOut,
@@ -188,14 +226,12 @@ contract GoldIssuer is AccessControl {
         public
         view
         onlyAvailablePair(_taIn, _taOut)
-        returns (
-            uint256 amtOut,
-            int256 rateIn,
-            int256 rateOut,
-            uint256 tInUpdatedAt,
-            uint256 tOutUpdatedAt
-        )
+        returns (QuoteData memory data)
     {
+        data.amtIn = _amtIn;
+        data.fee = (_amtIn * feeBps) / 10000;
+        _amtIn = _amtIn - data.fee;
+
         // Precision adjustment: adjust _amtIn to (taInDecimal + taOutDecimal) for calculation
         _amtIn = _amtIn * (10 ** uint256(IERC20Metadata(_taOut).decimals()));
 
@@ -206,22 +242,22 @@ contract GoldIssuer is AccessControl {
             priceFeedForToken[_taOut]
         );
 
-        (, rateIn, , tInUpdatedAt, ) = pfIn.latestRoundData();
-        (, rateOut, , tOutUpdatedAt, ) = pfOut.latestRoundData();
+        (, data.rateIn, , data.tInUpdatedAt, ) = pfIn.latestRoundData();
+        (, data.rateOut, , data.tOutUpdatedAt, ) = pfOut.latestRoundData();
 
-        amtOut =
-            (_amtIn * uint256(rateIn) * (10 ** pfOut.decimals())) /
-            (uint256(rateOut) * (10 ** pfIn.decimals()));
+        data.amtOut =
+            (_amtIn * uint256(data.rateIn) * (10 ** pfOut.decimals())) /
+            (uint256(data.rateOut) * (10 ** pfIn.decimals()));
 
         // Adjust back the precision: adjust amtOut to taOutDecimal
-        amtOut = amtOut / (10 ** uint256(IERC20Metadata(_taIn).decimals()));
+        data.amtOut =
+            data.amtOut /
+            (10 ** uint256(IERC20Metadata(_taIn).decimals()));
 
         // Truncate decimals
         uint256 adjDecimals = 10 **
             (IERC20Metadata(_taOut).decimals() - _retainingDecimals);
-        amtOut = (amtOut / adjDecimals) * adjDecimals;
-
-        return (amtOut, rateIn, rateOut, tInUpdatedAt, tOutUpdatedAt);
+        data.amtOut = (data.amtOut / adjDecimals) * adjDecimals;
     }
 
     event tokenIssued(
@@ -261,34 +297,38 @@ contract GoldIssuer is AccessControl {
         if (IERC20(_taIn).balanceOf(msg.sender) < _amtIn)
             revert InsufficientBalance(_taIn, msg.sender, _amtIn);
 
-        uint256 fee = (_amtIn * feeBps) / 10000;
-        cumulatedFees[_taIn] += fee;
-
-        (uint256 amtOut, int256 rateIn, int256 rateOut, , ) = getAmountOut(
+        QuoteData memory quoteData = getAmountOut(
             _taIn,
             _taOut,
-            _amtIn - fee, // deduct fee from amtIn
+            _amtIn,
             _retainingDecimals
         );
 
+        cumulatedFees[_taIn] += quoteData.fee;
+
         {
             uint256 reserveOut = getReserve(_taOut);
-            if (reserveOut < amtOut)
-                revert InsufficientReserve(_taOut, amtOut, reserveOut);
+            if (reserveOut < quoteData.amtOut)
+                revert InsufficientReserve(
+                    _taOut,
+                    quoteData.amtOut,
+                    reserveOut
+                );
         }
-        if (amtOut < _amtOutMin)
-            revert SlippageTooLow(_taOut, amtOut, _amtOutMin);
+        if (quoteData.amtOut < _amtOutMin)
+            revert SlippageTooLow(_taOut, quoteData.amtOut, _amtOutMin);
 
         IERC20(_taIn).transferFrom(msg.sender, address(this), _amtIn);
-        IERC20(_taOut).transfer(msg.sender, amtOut);
+        IERC20(_taOut).transfer(msg.sender, quoteData.amtOut);
+
         emit tokenIssued(
             _taIn,
             _taOut,
             _amtIn,
-            amtOut,
-            fee,
-            rateIn,
-            rateOut,
+            quoteData.amtOut,
+            quoteData.fee,
+            quoteData.rateIn,
+            quoteData.rateOut,
             msg.sender
         );
     }
