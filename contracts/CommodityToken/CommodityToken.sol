@@ -9,10 +9,10 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 /*
-    @title KGLDToken
-    @dev ERC20 Token representing Korea Gold-Backed Token (KGLD) with upgradeability, access control, pausing, and freezing features.
+    @title CommodityToken
+    @dev ERC20 Token representing real-asset backed token with upgradeability, access control, pausing, and freezing features.
  */
-contract KGLDToken is
+contract CommodityToken is
     Initializable,
     UUPSUpgradeable,
     ERC20Upgradeable,
@@ -24,7 +24,7 @@ contract KGLDToken is
     // Roles
     // ====================
     // @notice Default admin role for AccessControl is Declared in AccessControlUpgradeable : 0x00
-    // @notice UPGRADER_ROLE is used when authorizing upgrades
+    // @notice UPGRADER_ROLE is used when upgrading the authorized implementation
     // keccak256("UPGRADER_ROLE");
     bytes32 public constant UPGRADER_ROLE =
         0x189ab7a9244df0848122154315af71fe140f3db0fe014031783b0946b8c9d2e3;
@@ -36,7 +36,7 @@ contract KGLDToken is
     // keccak256("VAULT_MINTER_ROLE");
     bytes32 public constant VAULT_MINTER_ROLE =
         0x98e4415ac43dc65a73fb377c77c834c9fba44fb3f81dc603d1f33e6023519e07;
-    // @notice MINTER_ROLE is used to mint tokens
+    // @notice MINTER_ROLE is used to mint tokens(usually for bridge minting)
     // keccak256("MINTER_ROLE");
     bytes32 public constant MINTER_ROLE =
         0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6;
@@ -44,22 +44,22 @@ contract KGLDToken is
     // keccak256("BURNER_ROLE");
     bytes32 public constant BURNER_ROLE =
         0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848;
-    // @notice RISK_MANAGER_ROLE is used to manage risk-related functions such as pausing and freezing accounts
+    // @notice RISK_MANAGER_ROLE is used to manage risk-related functions
     // keccak256("RISK_MANAGER_ROLE");
     bytes32 public constant RISK_MANAGER_ROLE =
         0xb2e3ee861706f0756afea8a5257301f83561f9ac10b8f43b771dc928566f8c61;
 
     // @notice FROZEN_ROLE is used to identify frozen accounts
-    // @notice RISK_MANAGER_ROLE can add/remove accounts to/from this role
+    // @notice only RISK_MANAGER_ROLE can add/remove accounts to/from this role
     // keccak256("FROZEN_ROLE");
     bytes32 public constant FROZEN_ROLE =
         0x692fe418ed64ac7ff16f79ea7dade91c969e167ccb96f56f1a4cc50061b6005c;
 
-    // @notice MINT_APPROVER_ROLE is used to sign mint approvals
+    // @notice MINT_APPROVER_ROLE is used to make signature for mint approvals
     // keccak256("MINT_APPROVER_ROLE");
     bytes32 public constant MINT_APPROVER_ROLE =
         0x729e7093b317e8cb328751b2fec56d2c53d4821956f473a16b7334aeb4bd61bd;
-    // @notice UPGRADE_AUDITOR_ROLE is used to audit new implementation
+    // @notice UPGRADE_AUDITOR_ROLE is used to audit and confirm new implementation
     // keccak256("UPGRADE_AUDITOR_ROLE");
     bytes32 public constant UPGRADE_AUDITOR_ROLE =
         0x518cb1580b90d89361b4998d16c498d3d1e93d39fec155f2214eee68154fb72e;
@@ -67,10 +67,11 @@ contract KGLDToken is
     // ====================
     // Initializer
     // ====================
-    function initialize(address initialAdmin) public initializer onlyProxy {
-        string memory _name = "Korea Gold-Backed Token";
-        string memory _symbol = "KGLD";
-
+    function initialize(
+        address initialAdmin,
+        string memory _name,
+        string memory _symbol
+    ) public initializer onlyProxy {
         __ERC20_init(_name, _symbol);
 
         // including initialize EIP712 domain separator
@@ -112,12 +113,12 @@ contract KGLDToken is
     // Risk Manager Functions
     // ====================
     function freeze(address _account) external onlyProxy {
-        grantRole(FROZEN_ROLE, _account);
+        grantRole(FROZEN_ROLE, _account); // Permission validation is implemeted in grantRole function
         emit Frozen(_account);
     }
 
     function unfreeze(address _account) external onlyProxy {
-        revokeRole(FROZEN_ROLE, _account);
+        revokeRole(FROZEN_ROLE, _account); // Permission validation is implemeted in revokeRole function
         emit Unfrozen(_account);
     }
 
@@ -248,7 +249,10 @@ contract KGLDToken is
     // ====================
     // ERC20 Functions(Permissioned)
     // ====================
-    function mint(address _to, uint256 _amount) external onlyRole(MINTER_ROLE) {
+    function mint(
+        address _to,
+        uint256 _amount
+    ) external onlyRole(MINTER_ROLE) onlyProxy {
         _mint(_to, _amount);
         emit Minted(_to, _amount);
     }

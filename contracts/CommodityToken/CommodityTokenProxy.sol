@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/proxy/Proxy.sol";
 
-contract KGLDProxy is Proxy {
+contract CommodityTokenProxy is Proxy {
     // ====================
     // EIP-1967 Slots
     // ====================
