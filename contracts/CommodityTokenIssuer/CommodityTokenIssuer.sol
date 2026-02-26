@@ -10,7 +10,7 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract GoldIssuer is AccessControl {
+contract CommodityTokenIssuer is AccessControl {
     constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
 

@@ -10,9 +10,13 @@
 - CommodityToken.sol(sha256 : e25aa483c06d9e6c3abdb6795d0c5b63e9ccead059691c1cb6ffcb5fe7baa267)
 - CommodityTokenProxy.sol(sha256 : 4f21f71eb39568fbc27edf81d7b47e171e39e888d2766adbd5b98599f40004ee)
 
-## GoldIssuer
+## ~~GoldIssuer~~
 
-- GoldIssuer.sol(sha256 : a25cf9e180d7118dca43152e92bad4ab5df6b1e011618ecb6de850e242d2143d)
+- ~~GoldIssuer.sol(sha256 : a25cf9e180d7118dca43152e92bad4ab5df6b1e011618ecb6de850e242d2143d)~~
+
+## CommodityTokenIssuer
+
+- CommodityTokenIssuer.sol(sha256 : 5d487eeb92e7a0bb0481479f2035d01de86ac6874b37bbffd1f53fa7cbb6d87c)
 
 ## RedeemLock
 
