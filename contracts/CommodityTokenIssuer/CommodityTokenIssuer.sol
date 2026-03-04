@@ -75,6 +75,145 @@ contract CommodityTokenIssuer is AccessControl {
     }
 
     // ====================
+    // Time Restrictions
+    // ====================
+    struct TimeRestriction {
+        uint256 startTime; // timestamp when the restriction starts
+        uint256 endTime; // timestamp when the restriction ends
+    }
+
+    TimeRestriction[] internal timeRestrictions;
+
+    error RestrictedTime(uint256 startTime, uint256 endTime);
+
+    modifier onlyWithinAllowedTime() {
+        uint256 len = timeRestrictions.length;
+
+        uint256 t = block.timestamp;
+
+        // Optional fast-fail boundaries (cheaper than binary search in some cases)
+        // If t is before the first start or after the last end, it's definitely allowed.
+        if (
+            len == 0 ||
+            t < timeRestrictions[0].startTime ||
+            t >= timeRestrictions[len - 1].endTime
+        ) {
+            _;
+            return;
+        }
+
+        // Binary search for the largest index i such that timeRestrictions[i].startTime <= t
+        uint256 lo = 0;
+        uint256 hi = len; // [lo, hi)
+        while (lo + 1 < hi) {
+            uint256 mid = (lo + hi) >> 1; // (lo + hi) / 2
+            if (timeRestrictions[mid].startTime <= t) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+
+        // Now `lo` is the candidate interval (start <= t). Check if t < end => restricted.
+        uint256 s = timeRestrictions[lo].startTime;
+        uint256 e = timeRestrictions[lo].endTime;
+        if (t >= s && t < e) {
+            revert RestrictedTime(s, e);
+        }
+
+        _;
+    }
+
+    error InvalidTimeRestriction(uint256 startTime, uint256 endTime);
+
+    function sortAndMergeTimeRestrictions(
+        TimeRestriction[] memory _tr
+    ) internal pure returns (TimeRestriction[] memory _out) {
+        uint256 n = _tr.length;
+        if (n == 0) return _tr;
+
+        // 1) Validate + Insertion sort by startTime (stable enough, good for small n)
+        for (uint256 i = 0; i < n; i++) {
+            // Validate each range
+            if (_tr[i].startTime >= _tr[i].endTime) {
+                revert InvalidTimeRestriction(_tr[i].startTime, _tr[i].endTime);
+            }
+
+            // Insertion step (for i>0)
+            if (i == 0) continue;
+
+            TimeRestriction memory key = _tr[i];
+            uint256 j = i;
+            while (j > 0 && _tr[j - 1].startTime > key.startTime) {
+                _tr[j] = _tr[j - 1];
+                unchecked {
+                    --j;
+                }
+            }
+            _tr[j] = key;
+        }
+
+        // 2) Merge overlaps/adjacent into a new array (max size n)
+        _out = new TimeRestriction[](n);
+        uint256 m = 0;
+
+        TimeRestriction memory current = _tr[0];
+
+        for (uint256 i = 1; i < n; i++) {
+            TimeRestriction memory next = _tr[i];
+
+            // If overlapping OR adjacent: next.start <= current.end => merge
+            if (next.startTime <= current.endTime) {
+                // Extend end if needed
+                if (next.endTime > current.endTime) {
+                    current.endTime = next.endTime;
+                }
+            } else {
+                // No overlap: push current and move on
+                _out[m] = current;
+                unchecked {
+                    ++m;
+                }
+                current = next;
+            }
+        }
+
+        // push last
+        _out[m] = current;
+        unchecked {
+            ++m;
+        }
+
+        // 3) Shrink to exact length m
+        assembly {
+            mstore(_out, m)
+        }
+
+        return _out;
+    }
+
+    function setTimeRestrictions(
+        TimeRestriction[] memory _restrictions
+    ) external onlyRole(OPERATION_MANAGER_ROLE) {
+        TimeRestriction[] memory trs = sortAndMergeTimeRestrictions(
+            _restrictions
+        );
+
+        delete timeRestrictions;
+        for (uint256 i = 0; i < trs.length; i++) {
+            timeRestrictions.push(trs[i]);
+        }
+    }
+
+    function getTimeRestrictions()
+        external
+        view
+        returns (TimeRestriction[] memory)
+    {
+        return timeRestrictions;
+    }
+
+    // ====================
     // Roles
     // ====================
     // keccak256("OPERATION_MANAGER_ROLE");
@@ -293,7 +432,13 @@ contract CommodityTokenIssuer is AccessControl {
         uint256 _amtIn,
         uint256 _amtOutMin,
         uint256 _retainingDecimals
-    ) external onlyWhitelisted whenNotPaused onlyAvailablePair(_taIn, _taOut) {
+    )
+        external
+        onlyWhitelisted
+        whenNotPaused
+        onlyAvailablePair(_taIn, _taOut)
+        onlyWithinAllowedTime
+    {
         if (IERC20(_taIn).balanceOf(msg.sender) < _amtIn)
             revert InsufficientBalance(_taIn, msg.sender, _amtIn);
 
