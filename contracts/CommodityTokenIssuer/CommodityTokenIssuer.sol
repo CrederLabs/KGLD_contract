@@ -224,6 +224,10 @@ contract CommodityTokenIssuer is AccessControl {
     bytes32 public constant WHITELISTED_ROLE =
         0x8429d542926e6695b59ac6fbdcd9b37e8b1aeb757afab06ab60b1bb5878c3b49;
 
+    // keccak256("ASSET_MANAGER_ROLE");
+    bytes32 public constant ASSET_MANAGER_ROLE =
+        0xb1fadd3142ab2ad7f1337ea4d97112bcc8337fc11ce5b20cb04ad038adf99819;
+
     // ====================
     // Fee management
     // ====================
@@ -234,7 +238,7 @@ contract CommodityTokenIssuer is AccessControl {
     event FeeBpsChanged(uint256 oldFeeBps, uint256 newFeeBps);
     function setFeeBps(
         uint256 _newFeeBps
-    ) external onlyRole(OPERATION_MANAGER_ROLE) {
+    ) external onlyRole(ASSET_MANAGER_ROLE) {
         if (_newFeeBps > 10000) {
             revert FeeTooHigh(_newFeeBps);
         }
@@ -491,7 +495,7 @@ contract CommodityTokenIssuer is AccessControl {
         address _ta,
         address _to,
         uint256 _amt
-    ) external onlyRole(OPERATION_MANAGER_ROLE) {
+    ) external onlyRole(ASSET_MANAGER_ROLE) {
         uint256 reserve = getReserve(_ta);
         if (_amt > reserve) revert InsufficientReserve(_ta, _amt, reserve);
         IERC20(_ta).transfer(_to, _amt);
@@ -513,7 +517,7 @@ contract CommodityTokenIssuer is AccessControl {
         address _ta,
         address _to,
         uint256 _amt
-    ) external onlyRole(OPERATION_MANAGER_ROLE) {
+    ) external onlyRole(ASSET_MANAGER_ROLE) {
         uint256 feeAmt = cumulatedFees[_ta];
         if (_amt > feeAmt) revert InsufficientCumulatedFees(_ta, _amt, feeAmt);
         cumulatedFees[_ta] -= _amt;
