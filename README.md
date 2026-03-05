@@ -7,7 +7,7 @@
 
 ## CommodityTokenIssuer (v0.0.5)
 
-- CommodityTokenIssuer.sol(sha256 :)
+- CommodityTokenIssuer.sol(sha256 : 0b080d3f661e43d191ea9af94bed5e71e9daef8fa4995b8131c012724b575ade)
 
 ## RedeemLock
 
