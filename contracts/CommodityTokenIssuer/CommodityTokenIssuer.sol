@@ -96,6 +96,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     bytes32 public constant ASSET_MANAGER_ROLE =
         0xb1fadd3142ab2ad7f1337ea4d97112bcc8337fc11ce5b20cb04ad038adf99819;
 
+    uint256 public constant BIAS_POINT_DENOMINATOR = 10000;
+
     // ====================
     // Fee management
     // ====================
@@ -107,7 +109,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     function setFeeBps(
         uint256 _newFeeBps
     ) external onlyRole(ASSET_MANAGER_ROLE) {
-        if (_newFeeBps > 10000) {
+        if (_newFeeBps > BIAS_POINT_DENOMINATOR) {
             revert FeeTooHigh(_newFeeBps);
         }
         uint256 oldFeeBps = feeBps;
@@ -239,27 +241,30 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 _exRateOut, // Exchange rate for the output token, should be 8-decimal value.
         uint256 _retainingDecimals
     ) public view returns (QuoteData memory) {
-        uint256 fee = Math.mulDiv(_amtIn, feeBps, 10000);
+        uint256 fee = Math.mulDiv(_amtIn, feeBps, BIAS_POINT_DENOMINATOR);
+        uint256 amtInAfterFee = sub256(_amtIn, fee);
 
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
 
         // The full calculation is: ((_amtIn - fee) * 10 ** dOut * _exRateIn) / (10 ** dIn * _exRateOut)
         uint256 rawAmtOut = Math.mulDiv(
-            Math.mulDiv(sub256(_amtIn, fee), 10 ** dOut, 10 ** dIn),
+            Math.mulDiv(amtInAfterFee, 10 ** dOut, 10 ** dIn),
             _exRateIn,
             _exRateOut
         );
 
         uint256 retainingDecimal = sub256(dOut, _retainingDecimals);
 
+        uint256 _amountOut = sub256(
+            rawAmtOut,
+            (rawAmtOut % (10 ** retainingDecimal))
+        );
+
         return
             QuoteData({
                 amtIn: _amtIn,
-                amtOut: sub256(
-                    rawAmtOut,
-                    (rawAmtOut % (10 ** retainingDecimal))
-                ), // round down to the retaining decimals
+                amtOut: _amountOut,
                 fee: fee,
                 exRateIn: _exRateIn,
                 exRateOut: _exRateOut
@@ -270,7 +275,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         address _taIn, // token address to pay
         address _taOut, // token address to receive
         uint256 _amtIn, // amount to pay
-        uint256 _amtOut, // _amtOut is calculated from off-chain and passed in as a parameter, _amtOut = (_amtIn - fee) * _exRateIn / _exRateOut
+        uint256 _amtOutMin, // the minimum amount out that the user can receive, used for slippage control
         uint256 _exRateIn, // _exRateIn should be 8-decimal value
         uint256 _exRateOut, // _exRateOut should be 8-decimal value
         uint256 _retainingDecimals, // number of decimals to retain for the output amount
@@ -289,15 +294,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         // Validation 1. Check if the owner is whitelisted (if whitelist is active)
         checkIsWhitelisted(owner);
 
-        {
-            // Validation 2. Check if the contract has enough reserve of the output token
-            uint256 reserveOut = getReserve(_taOut);
-            if (_amtOut > reserveOut) {
-                revert InsufficientReserve(_taOut, _amtOut, reserveOut);
-            }
-        }
-
-        // Validation 3. Check if the calculation is right
+        // Validation 2. Check if the calculation is right
         QuoteData memory quoteData = getAmountOut(
             _taIn,
             _taOut,
@@ -307,13 +304,20 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             _retainingDecimals
         );
 
-        if (_amtOut != quoteData.amtOut) {
-            revert AmountOutCalculationMismatch(
-                _amtIn,
-                quoteData.fee,
-                _amtOut,
-                quoteData.amtOut
-            );
+        {
+            // Validation 3. Check if the amount out is within the slippage range
+            if (quoteData.amtOut < _amtOutMin) {
+                revert SlippageExceeded(quoteData.amtOut, _amtOutMin);
+            }
+            // Validation 4. Check if the contract has enough reserve of the output token
+            uint256 reserveOut = getReserve(_taOut);
+            if (quoteData.amtOut > reserveOut) {
+                revert InsufficientReserve(
+                    _taOut,
+                    quoteData.amtOut,
+                    reserveOut
+                );
+            }
         }
 
         // 1. Call Permit to increase allowance for the token transfer
@@ -326,6 +330,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             r,
             s
         );
+
         // 2. Transfer the tokens from the user to the contract
         uint256 balanceBefore = IERC20(_taIn).balanceOf(address(this));
         IERC20(_taIn).safeTransferFrom(owner, address(this), _amtIn);
@@ -336,9 +341,9 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
         // 3. Transfer the tokens from the contract to the user, after calculating the fee
         balanceBefore = IERC20(_taOut).balanceOf(address(this));
-        IERC20(_taOut).safeTransfer(owner, _amtOut);
+        IERC20(_taOut).safeTransfer(owner, quoteData.amtOut);
         balanceAfter = IERC20(_taOut).balanceOf(address(this));
-        if (sub256(balanceBefore, balanceAfter) != _amtOut) {
+        if (sub256(balanceBefore, balanceAfter) != quoteData.amtOut) {
             revert NotAllowedFeeOnTransfer(_taOut);
         }
         // 4. Update the cumulated fees
@@ -349,7 +354,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             _taOut,
             owner,
             _amtIn,
-            _amtOut,
+            quoteData.amtOut,
             quoteData.fee,
             _exRateIn,
             _exRateOut
@@ -367,20 +372,13 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 rateOut
     );
 
-    error NotAllowedFeeOnTransfer(address tokenAddress);
-
     error InsufficientReserve(
         address tokenAddress,
         uint256 requested,
         uint256 available
     );
 
-    error AmountOutCalculationMismatch(
-        uint256 amountIn, // amount in from the parameter
-        uint256 fee, // fee amount
-        uint256 amountOut, // amount out from the parameter
-        uint256 expectedAmountOut // amount out calculated from the exchange rate
-    );
+    error SlippageExceeded(uint256 amountOut, uint256 amountOutMin);
 
     // ====================
     // Reserve and Fee Management
@@ -426,7 +424,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     ) external onlyRole(ASSET_MANAGER_ROLE) {
         uint256 feeAmt = cumulatedFees[_ta];
         if (_amt > feeAmt) revert InsufficientCumulatedFees(_ta, _amt, feeAmt);
-        cumulatedFees[_ta] = sub256(cumulatedFees[_ta], _amt);
+
+        cumulatedFees[_ta] = sub256(feeAmt, _amt);
         IERC20(_ta).safeTransfer(_to, _amt);
 
         emit FeesWithdrawn(_ta, _to, _amt);
@@ -436,6 +435,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     // Global Error
     // ====================
     error NothingChanged();
+    error NotAllowedFeeOnTransfer(address tokenAddress);
 
     // ====================
     // Utils
