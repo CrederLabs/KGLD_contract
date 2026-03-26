@@ -320,16 +320,19 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             }
         }
 
-        // 1. Call Permit to increase allowance for the token transfer
-        IERC20Permit(_taIn).permit(
-            owner,
-            address(this),
-            _amtIn,
-            deadline,
-            v,
-            r,
-            s
-        );
+        uint256 allowance = IERC20(_taIn).allowance(owner, address(this));
+        if (allowance < _amtIn) {
+            // 1. Call Permit to increase allowance for the token transfer
+            IERC20Permit(_taIn).permit(
+                owner,
+                address(this),
+                _amtIn,
+                deadline,
+                v,
+                r,
+                s
+            );
+        }
 
         // 2. Transfer the tokens from the user to the contract
         uint256 balanceBefore = IERC20(_taIn).balanceOf(address(this));
