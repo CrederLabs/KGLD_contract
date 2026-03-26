@@ -447,12 +447,16 @@ contract CommodityToken is
     // @dev Only accounts with the UPGRADE_AUDITOR_ROLE can call this function
     // @dev This function allows the upgrade auditor to set the address of the audited implementation contract.
     // @dev This function is not including Updating the implementation itself, only setting the audited address.
+    event AuditedImplUpdated(address oldAuditedImpl, address newAuditedImpl);
+
     function updateAuditedImpl(
         address _newImpl
     ) external onlyProxy onlyRole(UPGRADE_AUDITOR_ROLE) {
+        address oldAuditedImpl = getAuditedImpl();
         assembly {
             sstore(auditedImpl, _newImpl)
         }
+        emit AuditedImplUpdated(oldAuditedImpl, _newImpl);
     }
 
     // ====================
