@@ -72,6 +72,10 @@ contract CommodityToken is
         string memory _name,
         string memory _symbol
     ) public initializer onlyProxy {
+        require(
+            initialAdmin != address(0),
+            "CommodityToken: initial admin is zero"
+        );
         __ERC20_init(_name, _symbol);
 
         // including initialize EIP712 domain separator
