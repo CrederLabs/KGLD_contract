@@ -116,11 +116,11 @@ contract CommodityToken is
     // Risk Manager Functions
     // ====================
     function freeze(address _account) external onlyProxy {
-        grantRole(FROZEN_ROLE, _account); // Permission validation is implemeted in grantRole function
+        grantRole(FROZEN_ROLE, _account); // Permission validation is implemented in grantRole function
     }
 
     function unfreeze(address _account) external onlyProxy {
-        revokeRole(FROZEN_ROLE, _account); // Permission validation is implemeted in revokeRole function
+        revokeRole(FROZEN_ROLE, _account); // Permission validation is implemented in revokeRole function
     }
 
     // @notice Users can self-assign FROZEN_ROLE via selfFreeze() without RISK_MANAGER_ROLE
@@ -246,7 +246,7 @@ contract CommodityToken is
 
         // Mark the nonce as used to prevent future use
         store.usedNonces[authorizer][nonce] = true;
-        emit AuthorizationCanceled(authorizer, nonce);
+        emit AuthorizationCancelled(authorizer, nonce);
     }
 
     error InvalidAuthorization(address authorizer, bytes32 nonce);
@@ -609,7 +609,7 @@ contract CommodityToken is
     event Burned(address indexed from, uint256 amount);
     event Wiped(address indexed account, uint256 amount);
     event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
-    event AuthorizationCanceled(
+    event AuthorizationCancelled(
         address indexed authorizer,
         bytes32 indexed nonce
     );

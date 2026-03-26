@@ -14,7 +14,7 @@ contract RedeemLock is AccessControl {
         Stocked,
         Redeemed,
         Burned,
-        Canceled
+        Cancelled
     }
 
     function statusToString(
@@ -24,7 +24,7 @@ contract RedeemLock is AccessControl {
         if (status == OrderStatus.Stocked) return "Stocked";
         if (status == OrderStatus.Redeemed) return "Redeemed";
         if (status == OrderStatus.Burned) return "Burned";
-        if (status == OrderStatus.Canceled) return "Canceled";
+        if (status == OrderStatus.Cancelled) return "Cancelled";
         return "Unknown";
     }
 
@@ -176,7 +176,7 @@ contract RedeemLock is AccessControl {
 
     error NotOrderOwner(bytes32 orderId);
 
-    event RedeemRequestCanceled(bytes32 indexed orderId, address indexed user);
+    event RedeemRequestCancelled(bytes32 indexed orderId, address indexed user);
 
     // @notice : User can cancel the redeem request and get refund when the order is pending
     function cancelRedeemRequest(bytes32 orderId) external {
@@ -185,16 +185,16 @@ contract RedeemLock is AccessControl {
         if (orders[orderId].status != OrderStatus.Pending)
             revert InvalidOrderStatus(orderId);
 
-        updateOrderStatus(orderId, OrderStatus.Canceled);
+        updateOrderStatus(orderId, OrderStatus.Cancelled);
 
         uint256 refundAmount = orders[orderId].goldWeight +
             orders[orderId].extraCost;
         redeemToken.transfer(msg.sender, refundAmount);
 
-        emit RedeemRequestCanceled(orderId, orders[orderId].user);
+        emit RedeemRequestCancelled(orderId, orders[orderId].user);
     }
 
-    event RedeemCanceled(bytes32 indexed orderId, address indexed user);
+    event RedeemCancelled(bytes32 indexed orderId, address indexed user);
     // @notice : If the order was redeemed by mistake, the admin can cancel the redeem
     function cancelRedeem(
         bytes32 orderId
@@ -204,7 +204,7 @@ contract RedeemLock is AccessControl {
 
         updateOrderStatus(orderId, OrderStatus.Stocked);
 
-        emit RedeemCanceled(orderId, orders[orderId].user);
+        emit RedeemCancelled(orderId, orders[orderId].user);
     }
 
     event CostsWithdrawn(address indexed to, uint256 amount);

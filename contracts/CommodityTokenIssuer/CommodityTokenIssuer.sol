@@ -198,7 +198,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     function getAmountIn(
         address _taIn,
         address _taOut,
-        uint256 _amtOut, // Desired token amount to recieve, after fee deduction
+        uint256 _amtOut, // Desired token amount to receive, after fee deduction
         uint256 _exRateIn, // Exchange rate for the input token, should be 8-decimal value.
         uint256 _exRateOut, // Exchange rate for the output token, should be 8-decimal value.
         uint256 _retainingDecimals
