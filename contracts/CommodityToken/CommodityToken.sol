@@ -50,6 +50,7 @@ contract CommodityToken is
 
     // @notice FROZEN_ROLE is used to identify frozen accounts
     // @notice only RISK_MANAGER_ROLE can add/remove accounts to/from this role
+    // @notice Users can self-assign FROZEN_ROLE via selfFreeze() without RISK_MANAGER_ROLE
     // 0x692fe418ed64ac7ff16f79ea7dade91c969e167ccb96f56f1a4cc50061b6005c;
     bytes32 public constant FROZEN_ROLE = keccak256("FROZEN_ROLE");
 
@@ -122,6 +123,7 @@ contract CommodityToken is
         revokeRole(FROZEN_ROLE, _account); // Permission validation is implemeted in revokeRole function
     }
 
+    // @notice Users can self-assign FROZEN_ROLE via selfFreeze() without RISK_MANAGER_ROLE
     function selfFreeze() external onlyProxy {
         _grantRole(FROZEN_ROLE, _msgSender());
     }
