@@ -69,10 +69,6 @@ contract RedeemLock is AccessControl {
 
     function redeemLock(uint256 _goldWeight, uint256 _extraCost) external {
         uint256 nonce = userNonce[msg.sender];
-        require(
-            userOrders[msg.sender][nonce] == bytes32(0),
-            "Nonce already used"
-        );
 
         uint256 totalAmount = _goldWeight + _extraCost;
         uint256 lockTime = block.timestamp;
