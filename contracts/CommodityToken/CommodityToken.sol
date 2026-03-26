@@ -25,44 +25,42 @@ contract CommodityToken is
     // ====================
     // @notice Default admin role for AccessControl is Declared in AccessControlUpgradeable : 0x00
     // @notice UPGRADER_ROLE is used when upgrading the authorized implementation
-    // keccak256("UPGRADER_ROLE");
-    bytes32 public constant UPGRADER_ROLE =
-        0x189ab7a9244df0848122154315af71fe140f3db0fe014031783b0946b8c9d2e3;
+    // 0x189ab7a9244df0848122154315af71fe140f3db0fe014031783b0946b8c9d2e3;
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
     // @notice PAUSER_ROLE is used to pause and unpause the contract
-    // keccak256("PAUSER_ROLE");
-    bytes32 public constant PAUSER_ROLE =
-        0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a;
+    // 0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a;
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
     // @notice VAULT_MINTER_ROLE is used to mint tokens(backed by vault assets)
-    // keccak256("VAULT_MINTER_ROLE");
-    bytes32 public constant VAULT_MINTER_ROLE =
-        0x98e4415ac43dc65a73fb377c77c834c9fba44fb3f81dc603d1f33e6023519e07;
+    // 0x98e4415ac43dc65a73fb377c77c834c9fba44fb3f81dc603d1f33e6023519e07;
+    bytes32 public constant VAULT_MINTER_ROLE = keccak256("VAULT_MINTER_ROLE");
+
     // @notice MINTER_ROLE is used to mint tokens(usually for bridge minting)
-    // keccak256("MINTER_ROLE");
-    bytes32 public constant MINTER_ROLE =
-        0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6;
+    // 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6;
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+
     // @notice BURNER_ROLE is used to burn tokens
-    // keccak256("BURNER_ROLE");
-    bytes32 public constant BURNER_ROLE =
-        0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848;
+    // 0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848;
+    bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
+
     // @notice RISK_MANAGER_ROLE is used to manage risk-related functions
-    // keccak256("RISK_MANAGER_ROLE");
-    bytes32 public constant RISK_MANAGER_ROLE =
-        0xb2e3ee861706f0756afea8a5257301f83561f9ac10b8f43b771dc928566f8c61;
+    // 0xb2e3ee861706f0756afea8a5257301f83561f9ac10b8f43b771dc928566f8c61;
+    bytes32 public constant RISK_MANAGER_ROLE = keccak256("RISK_MANAGER_ROLE");
 
     // @notice FROZEN_ROLE is used to identify frozen accounts
     // @notice only RISK_MANAGER_ROLE can add/remove accounts to/from this role
-    // keccak256("FROZEN_ROLE");
-    bytes32 public constant FROZEN_ROLE =
-        0x692fe418ed64ac7ff16f79ea7dade91c969e167ccb96f56f1a4cc50061b6005c;
+    // 0x692fe418ed64ac7ff16f79ea7dade91c969e167ccb96f56f1a4cc50061b6005c;
+    bytes32 public constant FROZEN_ROLE = keccak256("FROZEN_ROLE");
 
     // @notice MINT_APPROVER_ROLE is used to make signature for mint approvals
-    // keccak256("MINT_APPROVER_ROLE");
+    // 0x729e7093b317e8cb328751b2fec56d2c53d4821956f473a16b7334aeb4bd61bd;
     bytes32 public constant MINT_APPROVER_ROLE =
-        0x729e7093b317e8cb328751b2fec56d2c53d4821956f473a16b7334aeb4bd61bd;
+        keccak256("MINT_APPROVER_ROLE");
     // @notice UPGRADE_AUDITOR_ROLE is used to audit and confirm new implementation
-    // keccak256("UPGRADE_AUDITOR_ROLE");
+    // 0x518cb1580b90d89361b4998d16c498d3d1e93d39fec155f2214eee68154fb72e;
     bytes32 public constant UPGRADE_AUDITOR_ROLE =
-        0x518cb1580b90d89361b4998d16c498d3d1e93d39fec155f2214eee68154fb72e;
+        keccak256("UPGRADE_AUDITOR_ROLE");
 
     // ====================
     // Initializer
@@ -462,13 +460,18 @@ contract CommodityToken is
     // ====================
     // EIP3009
     // ====================
-    // keccak256("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
-    bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
-        0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267;
 
-    // keccak256("ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
+    // 0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267;
+    bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
+        keccak256(
+            "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+        );
+
+    // 0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8;
     bytes32 public constant RECEIVE_WITH_AUTHORIZATION_TYPEHASH =
-        0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8;
+        keccak256(
+            "ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+        );
 
     function transferWithAuthorization(
         address from,
