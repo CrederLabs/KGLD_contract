@@ -221,6 +221,11 @@ contract CommodityToken is
         bytes32 r,
         bytes32 s
     ) external onlyProxy {
+        AuthorizationStorage storage store = _getUsedNoncesStorage();
+        if (store.usedNonces[authorizer][nonce] == true) {
+            revert InvalidAuthorization(authorizer, nonce);
+        }
+
         // Verify Signature
         bytes32 structHash = keccak256(
             abi.encode(
@@ -240,9 +245,8 @@ contract CommodityToken is
         }
 
         // Mark the nonce as used to prevent future use
-        AuthorizationStorage storage store = _getUsedNoncesStorage();
         store.usedNonces[authorizer][nonce] = true;
-        emit AuthorizationUsed(authorizer, nonce);
+        emit AuthorizationCanceled(authorizer, nonce);
     }
 
     error InvalidAuthorization(address authorizer, bytes32 nonce);
@@ -605,4 +609,8 @@ contract CommodityToken is
     event Burned(address indexed from, uint256 amount);
     event Wiped(address indexed account, uint256 amount);
     event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
+    event AuthorizationCanceled(
+        address indexed authorizer,
+        bytes32 indexed nonce
+    );
 }
