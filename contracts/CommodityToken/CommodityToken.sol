@@ -311,7 +311,7 @@ contract CommodityToken is
         bytes32 hash = _hashTypedDataV4(structHash);
         address signer = ecrecover(hash, v, r, s);
 
-        if (!hasRole(MINT_APPROVER_ROLE, signer)) {
+        if (signer == address(0) || !hasRole(MINT_APPROVER_ROLE, signer)) {
             revert InvalidSignature();
         }
 
