@@ -272,6 +272,7 @@ contract CommodityToken is
         uint256 validBefore,
         uint256 currentTime
     );
+    error InvalidTimeframe(uint256 validAfter, uint256 validBefore);
     error InvalidSignature();
 
     function mintWithAuthorization(
@@ -286,6 +287,9 @@ contract CommodityToken is
         bytes32 s
     ) external onlyRole(VAULT_MINTER_ROLE) onlyProxy {
         // Check time validity
+        if (validAfter > validBefore) {
+            revert InvalidTimeframe(validAfter, validBefore);
+        }
         if (block.timestamp < validAfter || block.timestamp > validBefore) {
             revert AuthorizationExpired(
                 validAfter,
@@ -487,6 +491,9 @@ contract CommodityToken is
         bytes32 s
     ) external whenNotPaused onlyProxy {
         // check time validity
+        if (validAfter > validBefore) {
+            revert InvalidTimeframe(validAfter, validBefore);
+        }
         if (block.timestamp < validAfter || block.timestamp > validBefore) {
             revert AuthorizationExpired(
                 validAfter,
@@ -546,6 +553,9 @@ contract CommodityToken is
         }
 
         // check time validity
+        if (validAfter > validBefore) {
+            revert InvalidTimeframe(validAfter, validBefore);
+        }
         if (block.timestamp < validAfter || block.timestamp > validBefore) {
             revert AuthorizationExpired(
                 validAfter,
