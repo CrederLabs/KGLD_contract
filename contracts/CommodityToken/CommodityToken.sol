@@ -118,17 +118,14 @@ contract CommodityToken is
     // ====================
     function freeze(address _account) external onlyProxy {
         grantRole(FROZEN_ROLE, _account); // Permission validation is implemeted in grantRole function
-        emit Frozen(_account);
     }
 
     function unfreeze(address _account) external onlyProxy {
         revokeRole(FROZEN_ROLE, _account); // Permission validation is implemeted in revokeRole function
-        emit Unfrozen(_account);
     }
 
     function selfFreeze() external onlyProxy {
         _grantRole(FROZEN_ROLE, _msgSender());
-        emit Frozen(_msgSender());
     }
 
     error AccountNotFrozen(address account);
@@ -587,8 +584,6 @@ contract CommodityToken is
     event Minted(address indexed to, uint256 amount);
     event VaultedWeight(uint256 vaultedWeight);
     event Burned(address indexed from, uint256 amount);
-    event Frozen(address indexed account);
-    event Unfrozen(address indexed account);
     event Wiped(address indexed account, uint256 amount);
     event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
 }
