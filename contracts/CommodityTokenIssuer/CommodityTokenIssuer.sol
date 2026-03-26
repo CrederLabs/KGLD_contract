@@ -291,6 +291,11 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         onlyRole(OPERATION_MANAGER_ROLE)
         nonReentrant
     {
+        // Validation 0. Parameter check: non-zero amount
+        if (_amtIn == 0 || _amtOutMin == 0) {
+            revert InvalidAmount();
+        }
+
         // Validation 1. Check if the owner is whitelisted (if whitelist is active)
         checkIsWhitelisted(owner);
 
@@ -305,11 +310,16 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         );
 
         {
-            // Validation 3. Check if the amount out is within the slippage range
+            // Validation 3. Check if the amount out is not zero
+            if (quoteData.amtOut == 0) {
+                revert InvalidAmount();
+            }
+
+            // Validation 4. Check if the amount out is within the slippage range
             if (quoteData.amtOut < _amtOutMin) {
                 revert SlippageExceeded(quoteData.amtOut, _amtOutMin);
             }
-            // Validation 4. Check if the contract has enough reserve of the output token
+            // Validation 5. Check if the contract has enough reserve of the output token
             uint256 reserveOut = getReserve(_taOut);
             if (quoteData.amtOut > reserveOut) {
                 revert InsufficientReserve(
@@ -382,6 +392,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     );
 
     error SlippageExceeded(uint256 amountOut, uint256 amountOutMin);
+    error InvalidAmount();
 
     // ====================
     // Reserve and Fee Management
