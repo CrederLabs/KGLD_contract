@@ -285,7 +285,6 @@ contract CommodityToken is
         bytes32 nonce,
         uint256 validAfter,
         uint256 validBefore,
-        uint256 vaultedWeight,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -333,7 +332,6 @@ contract CommodityToken is
         // Available when signer == approver && msg.sender == MINTER_ROLE
         _mint(to, amount);
         emit Minted(to, amount);
-        emit VaultedWeight(vaultedWeight);
 
         // Mark the nonce as used
         store.usedNonces[signer][nonce] = true;
@@ -605,7 +603,6 @@ contract CommodityToken is
     // Events
     // ====================
     event Minted(address indexed to, uint256 amount);
-    event VaultedWeight(uint256 vaultedWeight);
     event Burned(address indexed from, uint256 amount);
     event Wiped(address indexed account, uint256 amount);
     event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
