@@ -335,7 +335,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[signer][nonce] = true;
-        emit AuthorizationUsed(msg.sender, nonce);
+        emit AuthorizationUsed(msg.sender, signer, nonce);
     }
 
     // ====================
@@ -532,7 +532,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[from][nonce] = true;
-        emit AuthorizationUsed(from, nonce);
+        emit AuthorizationUsed(from, signer, nonce);
 
         _transfer(from, to, value);
     }
@@ -594,7 +594,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[from][nonce] = true;
-        emit AuthorizationUsed(from, nonce);
+        emit AuthorizationUsed(from, signer, nonce);
 
         _transfer(from, to, value);
     }
@@ -605,7 +605,11 @@ contract CommodityToken is
     event Minted(address indexed to, uint256 amount);
     event Burned(address indexed from, uint256 amount);
     event Wiped(address indexed account, uint256 amount);
-    event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
+    event AuthorizationUsed(
+        address indexed msgSender,
+        address indexed authorizer,
+        bytes32 indexed nonce
+    );
     event AuthorizationCancelled(
         address indexed authorizer,
         bytes32 indexed nonce
