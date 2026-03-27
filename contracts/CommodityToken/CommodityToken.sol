@@ -140,7 +140,7 @@ contract CommodityToken is
         emit Wiped(_account, frozenBalance);
     }
 
-    function isFrozen(address _account) public view onlyProxy returns (bool) {
+    function isFrozen(address _account) public view returns (bool) {
         return hasRole(FROZEN_ROLE, _account);
     }
 
@@ -341,15 +341,15 @@ contract CommodityToken is
     // ====================
     // ERC20 Functions(Public)
     // ====================
-    function name() public view override onlyProxy returns (string memory) {
+    function name() public view override returns (string memory) {
         return super.name();
     }
 
-    function symbol() public view override onlyProxy returns (string memory) {
+    function symbol() public view override returns (string memory) {
         return super.symbol();
     }
 
-    function decimals() public view override onlyProxy returns (uint8) {
+    function decimals() public view override returns (uint8) {
         return super.decimals();
     }
 
@@ -378,18 +378,18 @@ contract CommodityToken is
 
     function balanceOf(
         address _account
-    ) public view override onlyProxy returns (uint256) {
+    ) public view override returns (uint256) {
         return super.balanceOf(_account);
     }
 
-    function totalSupply() public view override onlyProxy returns (uint256) {
+    function totalSupply() public view override returns (uint256) {
         return super.totalSupply();
     }
 
     function allowance(
         address _owner,
         address _spender
-    ) public view override onlyProxy returns (uint256) {
+    ) public view override returns (uint256) {
         return super.allowance(_owner, _spender);
     }
 
