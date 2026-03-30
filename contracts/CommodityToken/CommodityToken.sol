@@ -6,6 +6,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /*
     @title CommodityToken
@@ -236,7 +237,7 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer != authorizer) {
             revert InvalidSignature();
@@ -300,7 +301,7 @@ contract CommodityToken is
         }
 
         // Verify Signature
-        // if parameters are different from those signed data, ecrecover will return a different address
+        // if parameters are different from those signed data, ECDSA.recover will return a different address
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
@@ -315,7 +316,7 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer == address(0) || !hasRole(MINT_APPROVER_ROLE, signer)) {
             revert InvalidSignature();
@@ -522,7 +523,7 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer != from) {
             revert InvalidSignature();
@@ -584,7 +585,7 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer != from) {
             revert InvalidSignature();
