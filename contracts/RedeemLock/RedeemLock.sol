@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 interface IRedeemToken is IERC20 {
     function burn(uint256 amount) external;
@@ -67,25 +68,40 @@ contract RedeemLock is AccessControl {
         return userNonce[_user];
     }
 
-    function redeemLock(uint256 _goldWeight, uint256 _extraCost) external {
-        uint256 nonce = userNonce[msg.sender];
+    function redeemLock(
+        uint256 _goldWeight,
+        uint256 _extraCost,
+        address _owner,
+        uint256 _deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external onlyRole(REDEEM_MANAGER_ROLE) {
+        uint256 nonce = userNonce[_owner];
 
         uint256 totalAmount = _goldWeight + _extraCost;
         uint256 lockTime = block.timestamp;
-        redeemToken.transferFrom(msg.sender, address(this), totalAmount);
+
+        if (redeemToken.allowance(_owner, address(this)) < totalAmount) {
+            IERC20Permit(address(redeemToken)).permit(
+                _owner,
+                address(this),
+                totalAmount,
+                _deadline,
+                v,
+                r,
+                s
+            );
+        }
+
+        redeemToken.transferFrom(_owner, address(this), totalAmount);
 
         bytes32 orderId = keccak256(
-            abi.encodePacked(
-                msg.sender,
-                lockTime,
-                _goldWeight,
-                _extraCost,
-                nonce
-            )
+            abi.encodePacked(_owner, lockTime, _goldWeight, _extraCost, nonce)
         );
 
         orders[orderId] = OrderData({
-            user: msg.sender,
+            user: _owner,
             goldWeight: _goldWeight,
             extraCost: _extraCost,
             lockTime: lockTime,
@@ -94,15 +110,15 @@ contract RedeemLock is AccessControl {
 
         emit RedeemLockCreated(
             orderId,
-            msg.sender,
+            _owner,
             _goldWeight,
             _extraCost,
             lockTime,
             nonce
         );
 
-        userOrders[msg.sender][nonce] = orderId;
-        userNonce[msg.sender]++;
+        userOrders[_owner][nonce] = orderId;
+        userNonce[_owner]++;
     }
 
     error InvalidOrderStatus(bytes32 orderId);
