@@ -194,17 +194,22 @@ contract RedeemLock is AccessControl {
         emit RedeemRequestCancelled(orderId, orders[orderId].user);
     }
 
-    event RedeemCancelled(bytes32 indexed orderId, address indexed user);
+    event OrderStatusManualUpdated(
+        bytes32 indexed orderId,
+        OrderStatus indexed status,
+        address indexed orderOwner
+    );
     // @notice : If the order was redeemed by mistake, the admin can cancel the redeem
-    function cancelRedeem(
-        bytes32 orderId
+    function setOrderStatus(
+        bytes32 orderId,
+        OrderStatus _status
     ) external onlyRole(REDEEM_MANAGER_ROLE) {
-        if (orders[orderId].status != OrderStatus.Redeemed)
+        if (orders[orderId].status == _status)
             revert InvalidOrderStatus(orderId);
 
-        updateOrderStatus(orderId, OrderStatus.Stocked);
+        updateOrderStatus(orderId, _status);
 
-        emit RedeemCancelled(orderId, orders[orderId].user);
+        emit OrderStatusManualUpdated(orderId, _status, orders[orderId].user);
     }
 
     event CostsWithdrawn(address indexed to, uint256 amount);
