@@ -84,17 +84,16 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     // ====================
     // Roles
     // ====================
-    // keccak256("OPERATION_MANAGER_ROLE");
+    // 0x261b87b2321a08d52f3b3ee0167bc0ecb9d54938405960f6cfb55fe47cab3c0e;
     bytes32 public constant OPERATION_MANAGER_ROLE =
-        0x261b87b2321a08d52f3b3ee0167bc0ecb9d54938405960f6cfb55fe47cab3c0e;
+        keccak256("OPERATION_MANAGER_ROLE");
 
-    // keccak256("WHITELISTED_ROLE");
-    bytes32 public constant WHITELISTED_ROLE =
-        0x8429d542926e6695b59ac6fbdcd9b37e8b1aeb757afab06ab60b1bb5878c3b49;
+    // 0x8429d542926e6695b59ac6fbdcd9b37e8b1aeb757afab06ab60b1bb5878c3b49;
+    bytes32 public constant WHITELISTED_ROLE = keccak256("WHITELISTED_ROLE");
 
-    // keccak256("ASSET_MANAGER_ROLE");
+    // 0xb1fadd3142ab2ad7f1337ea4d97112bcc8337fc11ce5b20cb04ad038adf99819;
     bytes32 public constant ASSET_MANAGER_ROLE =
-        0xb1fadd3142ab2ad7f1337ea4d97112bcc8337fc11ce5b20cb04ad038adf99819;
+        keccak256("ASSET_MANAGER_ROLE");
 
     uint256 public constant BIAS_POINT_DENOMINATOR = 10000;
 
@@ -195,44 +194,77 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 exRateOut;
     }
 
+    error InvalidExchangeRate();
     function getAmountIn(
         address _taIn,
         address _taOut,
-        uint256 _amtOut, // Desired token amount to recieve, after fee deduction
+        uint256 _amtOut, // Desired token amount to receive, after fee deduction
         uint256 _exRateIn, // Exchange rate for the input token, should be 8-decimal value.
         uint256 _exRateOut, // Exchange rate for the output token, should be 8-decimal value.
         uint256 _retainingDecimals
     ) public view returns (QuoteData memory data) {
-        uint256 amtIn = 0;
-        uint256 h = IERC20(_taIn).totalSupply();
-
-        while (amtIn < h) {
-            uint256 mid = (amtIn + h) / 2;
-            data = getAmountOut(
-                _taIn,
-                _taOut,
-                mid,
-                _exRateIn,
-                _exRateOut,
-                _retainingDecimals
-            );
-
-            if (data.amtOut < _amtOut) {
-                amtIn = mid + 1;
-            } else {
-                h = mid;
-            }
+        if (_exRateIn == 0 || _exRateOut == 0) {
+            revert InvalidExchangeRate();
         }
 
-        data = getAmountOut(
+        uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
+        uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
+
+        // _amtOut is already the truncated output amount.
+        // Algebraic inverse of:
+        // rawAmtOut ~= ((_amtIn - fee) * 10**dOut * _exRateIn) / (10**dIn * _exRateOut)
+        //
+        // and approximating:
+        // (_amtIn - fee) ~= _amtIn * (DENOM - feeBps) / DENOM
+        //
+        // => amtIn ~= (_amtOut * 10**dIn * _exRateOut * DENOM)
+        //           / (10**dOut * _exRateIn * (DENOM - feeBps))
+        uint256 scaleIn = 10 ** dIn;
+        uint256 scaleOut = 10 ** dOut;
+        uint256 feeDenom = BIAS_POINT_DENOMINATOR - feeBps;
+
+        uint256 numerator = _amtOut;
+        numerator = Math.mulDiv(numerator, scaleIn, 1);
+        numerator = Math.mulDiv(numerator, _exRateOut, 1);
+        numerator = Math.mulDiv(numerator, BIAS_POINT_DENOMINATOR, 1);
+
+        uint256 denominator = scaleOut;
+        denominator = Math.mulDiv(denominator, _exRateIn, 1);
+        denominator = Math.mulDiv(denominator, feeDenom, 1);
+
+        uint256 approxAmtIn = numerator / denominator;
+        if (numerator % denominator != 0) {
+            approxAmtIn += 1;
+        }
+
+        // Correction step:
+        // Because getAmountOut() includes floor rounding + retainingDecimals truncation,
+        // the algebraic inverse may still be slightly low.
+        // Increase until output is sufficient.
+        QuoteData memory q = getAmountOut(
             _taIn,
             _taOut,
-            amtIn,
+            approxAmtIn,
             _exRateIn,
             _exRateOut,
             _retainingDecimals
         );
+
+        while (q.amtOut < _amtOut) {
+            approxAmtIn += 1;
+            q = getAmountOut(
+                _taIn,
+                _taOut,
+                approxAmtIn,
+                _exRateIn,
+                _exRateOut,
+                _retainingDecimals
+            );
+        }
+
+        return q;
     }
+
     function getAmountOut(
         address _taIn,
         address _taOut,
@@ -241,6 +273,10 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 _exRateOut, // Exchange rate for the output token, should be 8-decimal value.
         uint256 _retainingDecimals
     ) public view returns (QuoteData memory) {
+        if (_exRateIn == 0 || _exRateOut == 0) {
+            revert InvalidExchangeRate();
+        }
+
         uint256 fee = Math.mulDiv(_amtIn, feeBps, BIAS_POINT_DENOMINATOR);
         uint256 amtInAfterFee = sub256(_amtIn, fee);
 
@@ -291,6 +327,16 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         onlyRole(OPERATION_MANAGER_ROLE)
         nonReentrant
     {
+        // Validation 0. Parameter check: non-zero amount
+        if (_amtIn == 0 || _amtOutMin == 0) {
+            revert InvalidAmount();
+        }
+
+        // Validation 0. Parameter check: exrate cannot be zero
+        if (_exRateIn == 0 || _exRateOut == 0) {
+            revert InvalidExchangeRate();
+        }
+
         // Validation 1. Check if the owner is whitelisted (if whitelist is active)
         checkIsWhitelisted(owner);
 
@@ -305,11 +351,16 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         );
 
         {
-            // Validation 3. Check if the amount out is within the slippage range
+            // Validation 3. Check if the amount out is not zero
+            if (quoteData.amtOut == 0) {
+                revert InvalidAmount();
+            }
+
+            // Validation 4. Check if the amount out is within the slippage range
             if (quoteData.amtOut < _amtOutMin) {
                 revert SlippageExceeded(quoteData.amtOut, _amtOutMin);
             }
-            // Validation 4. Check if the contract has enough reserve of the output token
+            // Validation 5. Check if the contract has enough reserve of the output token
             uint256 reserveOut = getReserve(_taOut);
             if (quoteData.amtOut > reserveOut) {
                 revert InsufficientReserve(
@@ -320,16 +371,19 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             }
         }
 
-        // 1. Call Permit to increase allowance for the token transfer
-        IERC20Permit(_taIn).permit(
-            owner,
-            address(this),
-            _amtIn,
-            deadline,
-            v,
-            r,
-            s
-        );
+        uint256 allowance = IERC20(_taIn).allowance(owner, address(this));
+        if (allowance < _amtIn) {
+            // 1. Call Permit to increase allowance for the token transfer
+            IERC20Permit(_taIn).permit(
+                owner,
+                address(this),
+                _amtIn,
+                deadline,
+                v,
+                r,
+                s
+            );
+        }
 
         // 2. Transfer the tokens from the user to the contract
         uint256 balanceBefore = IERC20(_taIn).balanceOf(address(this));
@@ -379,6 +433,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     );
 
     error SlippageExceeded(uint256 amountOut, uint256 amountOutMin);
+    error InvalidAmount();
 
     // ====================
     // Reserve and Fee Management
