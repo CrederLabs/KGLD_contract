@@ -47,7 +47,6 @@ contract RedeemLock is AccessControl {
         address user;
         uint256 goldWeight;
         uint256 extraCost;
-        uint256 lockTime;
         OrderStatus status;
     }
 
@@ -60,7 +59,6 @@ contract RedeemLock is AccessControl {
         address indexed user,
         uint256 goldWeight,
         uint256 extraCost,
-        uint256 lockTime,
         uint256 nonce
     );
 
@@ -80,7 +78,6 @@ contract RedeemLock is AccessControl {
         uint256 nonce = userNonce[_owner];
 
         uint256 totalAmount = _goldWeight + _extraCost;
-        uint256 lockTime = block.timestamp;
 
         if (redeemToken.allowance(_owner, address(this)) < totalAmount) {
             IERC20Permit(address(redeemToken)).permit(
@@ -97,25 +94,17 @@ contract RedeemLock is AccessControl {
         redeemToken.transferFrom(_owner, address(this), totalAmount);
 
         bytes32 orderId = keccak256(
-            abi.encodePacked(_owner, lockTime, _goldWeight, _extraCost, nonce)
+            abi.encodePacked(_owner, _goldWeight, _extraCost, nonce)
         );
 
         orders[orderId] = OrderData({
             user: _owner,
             goldWeight: _goldWeight,
             extraCost: _extraCost,
-            lockTime: lockTime,
             status: OrderStatus.Pending
         });
 
-        emit RedeemLockCreated(
-            orderId,
-            _owner,
-            _goldWeight,
-            _extraCost,
-            lockTime,
-            nonce
-        );
+        emit RedeemLockCreated(orderId, _owner, _goldWeight, _extraCost, nonce);
 
         userOrders[_owner][nonce] = orderId;
         userNonce[_owner]++;
