@@ -224,8 +224,15 @@ contract RedeemLock is AccessControl {
         bytes32 orderId,
         OrderStatus _status
     ) external onlyRole(REDEEM_MANAGER_ROLE) {
-        if (orders[orderId].status == _status)
+        // only allow to set status to right previous status
+        OrderStatus currentStatus = (orders[orderId].status);
+        if (
+            uint8(currentStatus) + 1 != uint8(_status) ||
+            currentStatus == OrderStatus.Burned ||
+            currentStatus == OrderStatus.Cancelled
+        ) {
             revert InvalidOrderStatus(orderId);
+        }
 
         updateOrderStatus(orderId, _status);
 
