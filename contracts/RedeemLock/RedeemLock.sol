@@ -80,21 +80,36 @@ contract RedeemLock is AccessControl {
         uint256 totalAmount = _goldWeight + _extraCost;
 
         if (redeemToken.allowance(_owner, address(this)) < totalAmount) {
-            IERC20Permit(address(redeemToken)).permit(
-                _owner,
-                address(this),
-                totalAmount,
-                _deadline,
-                v,
-                r,
-                s
-            );
+            try
+                IERC20Permit(address(redeemToken)).permit(
+                    _owner,
+                    address(this),
+                    totalAmount,
+                    _deadline,
+                    v,
+                    r,
+                    s
+                )
+            {
+                // Permit successful, allowance should be updated
+            } catch {
+                // permit may have been front-run or otherwise failed
+                // anyway, continue and let the transferFrom fail if allowance is insufficient
+            }
         }
 
+        // If the permit succeeded, this transferFrom should work;
+        // if it failed, it will revert here due to insufficient allowance
         redeemToken.transferFrom(_owner, address(this), totalAmount);
 
         bytes32 orderId = keccak256(
-            abi.encodePacked(_owner, _goldWeight, _extraCost, nonce)
+            abi.encodePacked(
+                _owner,
+                _goldWeight,
+                _extraCost,
+                nonce,
+                block.timestamp
+            )
         );
 
         orders[orderId] = OrderData({
