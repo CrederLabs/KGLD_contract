@@ -227,9 +227,10 @@ contract RedeemLock is AccessControl {
         // only allow to set status to right previous status
         OrderStatus currentStatus = (orders[orderId].status);
         if (
-            uint8(currentStatus) + 1 != uint8(_status) ||
+            currentStatus == OrderStatus.Pending ||
             currentStatus == OrderStatus.Burned ||
-            currentStatus == OrderStatus.Cancelled
+            currentStatus == OrderStatus.Cancelled ||
+            uint8(currentStatus) - 1 != uint8(_status)
         ) {
             revert InvalidOrderStatus(orderId);
         }
