@@ -285,9 +285,9 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
         // The full calculation is: ((_amtIn - fee) * 10 ** dOut * _exRateIn) / (10 ** dIn * _exRateOut)
         uint256 rawAmtOut = Math.mulDiv(
-            Math.mulDiv(amtInAfterFee, 10 ** dOut, 10 ** dIn),
+            Math.mulDiv(amtInAfterFee, 10 ** dOut, 1),
             _exRateIn,
-            _exRateOut
+            _exRateOut * (10 ** dIn)
         );
 
         uint256 retainingDecimal = sub256(dOut, _retainingDecimals);
