@@ -209,35 +209,36 @@ contract RedeemLock is AccessControl {
 
         uint256 refundAmount = orders[orderId].goldWeight +
             orders[orderId].extraCost;
+
+        // Clear the order data to prevent future confusion, double-refunds
+        orders[orderId].goldWeight = 0;
+        orders[orderId].extraCost = 0;
+
         redeemToken.transfer(msg.sender, refundAmount);
 
         emit RedeemRequestCancelled(orderId, orders[orderId].user);
     }
 
-    event OrderStatusManualUpdated(
+    event RedeemCancelled(
         bytes32 indexed orderId,
-        OrderStatus indexed status,
-        address indexed orderOwner
+        address indexed orderOwner,
+        string reason
     );
-    // @notice : If the order was redeemed by mistake, the admin can cancel the redeem
-    function setOrderStatus(
+
+    // @notice : If the order status was changed to "Redeemed" by mistake, the DEFAULT_ADMIN_ROLE can cancel the redeem order
+    // @params : _reason - the reason for cancellation, which will be emitted in the RedeemCancelled event
+    function cancelRedeemedOrder(
         bytes32 orderId,
-        OrderStatus _status
-    ) external onlyRole(REDEEM_MANAGER_ROLE) {
-        // only allow to set status to right previous status
+        string memory _reason
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         OrderStatus currentStatus = (orders[orderId].status);
-        if (
-            currentStatus == OrderStatus.Pending ||
-            currentStatus == OrderStatus.Burned ||
-            currentStatus == OrderStatus.Cancelled ||
-            uint8(currentStatus) - 1 != uint8(_status)
-        ) {
+        if (currentStatus != OrderStatus.Redeemed) {
             revert InvalidOrderStatus(orderId);
         }
 
-        updateOrderStatus(orderId, _status);
+        updateOrderStatus(orderId, OrderStatus.Stocked);
 
-        emit OrderStatusManualUpdated(orderId, _status, orders[orderId].user);
+        emit RedeemCancelled(orderId, orders[orderId].user, _reason);
     }
 
     event CostsWithdrawn(address indexed to, uint256 amount);
