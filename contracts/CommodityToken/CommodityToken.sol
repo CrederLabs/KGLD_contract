@@ -358,18 +358,19 @@ contract CommodityToken is
         uint256 _amount,
         bool emitEvent
     ) internal override onlyProxy {
-        //Frozen Accounts must not be able to approve and to be approved
-        if (isFrozen(_owner)) {
-            revert AccountFrozen(_owner);
-        }
-        if (isFrozen(_spender)) {
-            revert AccountFrozen(_spender);
-        }
-
         // When amount is zero, it means the approval is being revoked, so we allow it even when paused
         // For any non-zero approval, the contract must not be paused
         if (_amount > 0) {
             _requireNotPaused();
+
+            // Frozen Accounts must not be able to approve and to be approved
+            // Revoking approvals is allowed even the account is frozen
+            if (isFrozen(_owner)) {
+                revert AccountFrozen(_owner);
+            }
+            if (isFrozen(_spender)) {
+                revert AccountFrozen(_spender);
+            }
         }
 
         super._approve(_owner, _spender, _amount, emitEvent);
