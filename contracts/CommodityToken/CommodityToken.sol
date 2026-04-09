@@ -292,7 +292,7 @@ contract CommodityToken is
         if (validAfter > validBefore) {
             revert InvalidTimeframe(validAfter, validBefore);
         }
-        if (block.timestamp < validAfter || block.timestamp > validBefore) {
+        if (block.timestamp <= validAfter || block.timestamp >= validBefore) {
             revert AuthorizationExpired(
                 validAfter,
                 validBefore,
@@ -496,7 +496,7 @@ contract CommodityToken is
         if (validAfter > validBefore) {
             revert InvalidTimeframe(validAfter, validBefore);
         }
-        if (block.timestamp < validAfter || block.timestamp > validBefore) {
+        if (block.timestamp <= validAfter || block.timestamp >= validBefore) {
             revert AuthorizationExpired(
                 validAfter,
                 validBefore,
@@ -558,7 +558,7 @@ contract CommodityToken is
         if (validAfter > validBefore) {
             revert InvalidTimeframe(validAfter, validBefore);
         }
-        if (block.timestamp < validAfter || block.timestamp > validBefore) {
+        if (block.timestamp <= validAfter || block.timestamp >= validBefore) {
             revert AuthorizationExpired(
                 validAfter,
                 validBefore,
