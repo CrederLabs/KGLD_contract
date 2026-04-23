@@ -136,6 +136,10 @@ contract CommodityToken is
         }
         uint256 frozenBalance = balanceOf(_account);
         _updateForWipe(_account, frozenBalance);
+
+        // After wiping the frozen account, nonce for allowances should be increased to reset all allowances
+        _increaseAllowanceNonce(_account);
+
         emit Wiped(_account, frozenBalance);
     }
 
@@ -373,7 +377,21 @@ contract CommodityToken is
             }
         }
 
-        super._approve(_owner, _spender, _amount, emitEvent);
+        if (_owner == address(0)) {
+            revert ERC20InvalidApprover(address(0));
+        }
+        if (_spender == address(0)) {
+            revert ERC20InvalidSpender(address(0));
+        }
+
+        AllowanceNonceStorage
+            storage allowanceStorage = _getAllowanceNonceStorage();
+        uint256 currentNonce = allowanceStorage.nonce[_owner];
+        allowanceStorage.allowance[_owner][currentNonce][_spender] = _amount;
+
+        if (emitEvent) {
+            emit Approval(_owner, _spender, _amount);
+        }
     }
 
     function balanceOf(
@@ -386,11 +404,44 @@ contract CommodityToken is
         return super.totalSupply();
     }
 
+    // When an account is unfrozen, allowances are being reset
+    // Allowance : address user => uint256 nonce => address spender => uint256 amount
+    struct AllowanceNonceStorage {
+        mapping(address => uint256) nonce;
+        mapping(address => mapping(uint256 => mapping(address => uint256))) allowance;
+    }
+
+    // allowanceNonceStorage slot
+    // keccak256(abi.encode(uint256(keccak256(bytes("ALLOWANCE_NONCE_STORAGE"))) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant allowanceNonceStorage =
+        0xea41d1798cd34728e904635e32c4b899afc3c827783776b2bfabce68dbf12100;
+
+    function _getAllowanceNonceStorage()
+        private
+        pure
+        returns (AllowanceNonceStorage storage store)
+    {
+        assembly {
+            store.slot := allowanceNonceStorage
+        }
+    }
+
+    function _increaseAllowanceNonce(address _owner) internal {
+        AllowanceNonceStorage
+            storage allowanceStorage = _getAllowanceNonceStorage();
+        allowanceStorage.nonce[_owner]++;
+    }
+
     function allowance(
         address _owner,
         address _spender
     ) public view override returns (uint256) {
-        return super.allowance(_owner, _spender);
+        AllowanceNonceStorage
+            storage allowanceStorage = _getAllowanceNonceStorage();
+
+        uint256 currentNonce = allowanceStorage.nonce[_owner];
+
+        return allowanceStorage.allowance[_owner][currentNonce][_spender];
     }
 
     function transfer(
