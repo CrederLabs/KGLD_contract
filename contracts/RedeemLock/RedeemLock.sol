@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 interface IRedeemToken is IERC20 {
     function burn(uint256 amount) external;
@@ -14,7 +15,7 @@ contract RedeemLock is AccessControl {
         Stocked,
         Redeemed,
         Burned,
-        Canceled
+        Cancelled
     }
 
     function statusToString(
@@ -24,7 +25,7 @@ contract RedeemLock is AccessControl {
         if (status == OrderStatus.Stocked) return "Stocked";
         if (status == OrderStatus.Redeemed) return "Redeemed";
         if (status == OrderStatus.Burned) return "Burned";
-        if (status == OrderStatus.Canceled) return "Canceled";
+        if (status == OrderStatus.Cancelled) return "Cancelled";
         return "Unknown";
     }
 
@@ -46,7 +47,6 @@ contract RedeemLock is AccessControl {
         address user;
         uint256 goldWeight;
         uint256 extraCost;
-        uint256 lockTime;
         OrderStatus status;
     }
 
@@ -59,7 +59,6 @@ contract RedeemLock is AccessControl {
         address indexed user,
         uint256 goldWeight,
         uint256 extraCost,
-        uint256 lockTime,
         uint256 nonce
     );
 
@@ -67,46 +66,63 @@ contract RedeemLock is AccessControl {
         return userNonce[_user];
     }
 
-    function redeemLock(uint256 _goldWeight, uint256 _extraCost) external {
-        uint256 nonce = userNonce[msg.sender];
-        require(
-            userOrders[msg.sender][nonce] == bytes32(0),
-            "Nonce already used"
-        );
+    function redeemLock(
+        uint256 _goldWeight,
+        uint256 _extraCost,
+        address _owner,
+        uint256 _deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external onlyRole(REDEEM_MANAGER_ROLE) {
+        uint256 nonce = userNonce[_owner];
 
         uint256 totalAmount = _goldWeight + _extraCost;
-        uint256 lockTime = block.timestamp;
-        redeemToken.transferFrom(msg.sender, address(this), totalAmount);
+
+        if (redeemToken.allowance(_owner, address(this)) < totalAmount) {
+            try
+                IERC20Permit(address(redeemToken)).permit(
+                    _owner,
+                    address(this),
+                    totalAmount,
+                    _deadline,
+                    v,
+                    r,
+                    s
+                )
+            {
+                // Permit successful, allowance should be updated
+            } catch {
+                // permit may have been front-run or otherwise failed
+                // anyway, continue and let the transferFrom fail if allowance is insufficient
+            }
+        }
+
+        // If the permit succeeded, this transferFrom should work;
+        // if it failed, it will revert here due to insufficient allowance
+        redeemToken.transferFrom(_owner, address(this), totalAmount);
 
         bytes32 orderId = keccak256(
             abi.encodePacked(
-                msg.sender,
-                lockTime,
+                _owner,
                 _goldWeight,
                 _extraCost,
-                nonce
+                nonce,
+                block.timestamp
             )
         );
 
         orders[orderId] = OrderData({
-            user: msg.sender,
+            user: _owner,
             goldWeight: _goldWeight,
             extraCost: _extraCost,
-            lockTime: lockTime,
             status: OrderStatus.Pending
         });
 
-        emit RedeemLockCreated(
-            orderId,
-            msg.sender,
-            _goldWeight,
-            _extraCost,
-            lockTime,
-            nonce
-        );
+        emit RedeemLockCreated(orderId, _owner, _goldWeight, _extraCost, nonce);
 
-        userOrders[msg.sender][nonce] = orderId;
-        userNonce[msg.sender]++;
+        userOrders[_owner][nonce] = orderId;
+        userNonce[_owner]++;
     }
 
     error InvalidOrderStatus(bytes32 orderId);
@@ -180,7 +196,7 @@ contract RedeemLock is AccessControl {
 
     error NotOrderOwner(bytes32 orderId);
 
-    event RedeemRequestCanceled(bytes32 indexed orderId, address indexed user);
+    event RedeemRequestCancelled(bytes32 indexed orderId, address indexed user);
 
     // @notice : User can cancel the redeem request and get refund when the order is pending
     function cancelRedeemRequest(bytes32 orderId) external {
@@ -189,26 +205,41 @@ contract RedeemLock is AccessControl {
         if (orders[orderId].status != OrderStatus.Pending)
             revert InvalidOrderStatus(orderId);
 
-        updateOrderStatus(orderId, OrderStatus.Canceled);
+        updateOrderStatus(orderId, OrderStatus.Cancelled);
 
         uint256 refundAmount = orders[orderId].goldWeight +
             orders[orderId].extraCost;
+
+        // Clear the order data to prevent future confusion, double-refunds
+        orders[orderId].goldWeight = 0;
+        orders[orderId].extraCost = 0;
+
         redeemToken.transfer(msg.sender, refundAmount);
 
-        emit RedeemRequestCanceled(orderId, orders[orderId].user);
+        emit RedeemRequestCancelled(orderId, orders[orderId].user);
     }
 
-    event RedeemCanceled(bytes32 indexed orderId, address indexed user);
-    // @notice : If the order was redeemed by mistake, the admin can cancel the redeem
-    function cancelRedeem(
-        bytes32 orderId
-    ) external onlyRole(REDEEM_MANAGER_ROLE) {
-        if (orders[orderId].status != OrderStatus.Redeemed)
+    event RedeemCancelled(
+        bytes32 indexed orderId,
+        address indexed orderOwner,
+        string reason
+    );
+
+    // @notice : If the order status was changed to "Redeemed" by mistake, the ASSET_MANAGER_ROLE can cancel the redeem order
+    // @notice : ASSET_MANAGER_ROLE is managed by Multisig, so off-chain discussion and agreement is required before calling this function
+    // @params _reason The reason for cancellation, which will be emitted in the RedeemCancelled event
+    function cancelRedeemedOrder(
+        bytes32 orderId,
+        string memory _reason
+    ) external onlyRole(ASSET_MANAGER_ROLE) {
+        OrderStatus currentStatus = (orders[orderId].status);
+        if (currentStatus != OrderStatus.Redeemed) {
             revert InvalidOrderStatus(orderId);
+        }
 
         updateOrderStatus(orderId, OrderStatus.Stocked);
 
-        emit RedeemCanceled(orderId, orders[orderId].user);
+        emit RedeemCancelled(orderId, orders[orderId].user, _reason);
     }
 
     event CostsWithdrawn(address indexed to, uint256 amount);

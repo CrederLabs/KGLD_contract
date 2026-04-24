@@ -3,10 +3,10 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /*
     @title CommodityToken
@@ -15,7 +15,6 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 contract CommodityToken is
     Initializable,
     UUPSUpgradeable,
-    ERC20Upgradeable,
     ERC20PermitUpgradeable,
     AccessControlUpgradeable,
     PausableUpgradeable
@@ -25,44 +24,43 @@ contract CommodityToken is
     // ====================
     // @notice Default admin role for AccessControl is Declared in AccessControlUpgradeable : 0x00
     // @notice UPGRADER_ROLE is used when upgrading the authorized implementation
-    // keccak256("UPGRADER_ROLE");
-    bytes32 public constant UPGRADER_ROLE =
-        0x189ab7a9244df0848122154315af71fe140f3db0fe014031783b0946b8c9d2e3;
+    // 0x189ab7a9244df0848122154315af71fe140f3db0fe014031783b0946b8c9d2e3;
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
     // @notice PAUSER_ROLE is used to pause and unpause the contract
-    // keccak256("PAUSER_ROLE");
-    bytes32 public constant PAUSER_ROLE =
-        0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a;
+    // 0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a;
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
     // @notice VAULT_MINTER_ROLE is used to mint tokens(backed by vault assets)
-    // keccak256("VAULT_MINTER_ROLE");
-    bytes32 public constant VAULT_MINTER_ROLE =
-        0x98e4415ac43dc65a73fb377c77c834c9fba44fb3f81dc603d1f33e6023519e07;
+    // 0x98e4415ac43dc65a73fb377c77c834c9fba44fb3f81dc603d1f33e6023519e07;
+    bytes32 public constant VAULT_MINTER_ROLE = keccak256("VAULT_MINTER_ROLE");
+
     // @notice MINTER_ROLE is used to mint tokens(usually for bridge minting)
-    // keccak256("MINTER_ROLE");
-    bytes32 public constant MINTER_ROLE =
-        0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6;
+    // 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6;
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+
     // @notice BURNER_ROLE is used to burn tokens
-    // keccak256("BURNER_ROLE");
-    bytes32 public constant BURNER_ROLE =
-        0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848;
+    // 0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848;
+    bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
+
     // @notice RISK_MANAGER_ROLE is used to manage risk-related functions
-    // keccak256("RISK_MANAGER_ROLE");
-    bytes32 public constant RISK_MANAGER_ROLE =
-        0xb2e3ee861706f0756afea8a5257301f83561f9ac10b8f43b771dc928566f8c61;
+    // 0xb2e3ee861706f0756afea8a5257301f83561f9ac10b8f43b771dc928566f8c61;
+    bytes32 public constant RISK_MANAGER_ROLE = keccak256("RISK_MANAGER_ROLE");
 
     // @notice FROZEN_ROLE is used to identify frozen accounts
     // @notice only RISK_MANAGER_ROLE can add/remove accounts to/from this role
-    // keccak256("FROZEN_ROLE");
-    bytes32 public constant FROZEN_ROLE =
-        0x692fe418ed64ac7ff16f79ea7dade91c969e167ccb96f56f1a4cc50061b6005c;
+    // @notice Users can self-assign FROZEN_ROLE via selfFreeze() without RISK_MANAGER_ROLE
+    // 0x692fe418ed64ac7ff16f79ea7dade91c969e167ccb96f56f1a4cc50061b6005c;
+    bytes32 public constant FROZEN_ROLE = keccak256("FROZEN_ROLE");
 
     // @notice MINT_APPROVER_ROLE is used to make signature for mint approvals
-    // keccak256("MINT_APPROVER_ROLE");
+    // 0x729e7093b317e8cb328751b2fec56d2c53d4821956f473a16b7334aeb4bd61bd;
     bytes32 public constant MINT_APPROVER_ROLE =
-        0x729e7093b317e8cb328751b2fec56d2c53d4821956f473a16b7334aeb4bd61bd;
+        keccak256("MINT_APPROVER_ROLE");
     // @notice UPGRADE_AUDITOR_ROLE is used to audit and confirm new implementation
-    // keccak256("UPGRADE_AUDITOR_ROLE");
+    // 0x518cb1580b90d89361b4998d16c498d3d1e93d39fec155f2214eee68154fb72e;
     bytes32 public constant UPGRADE_AUDITOR_ROLE =
-        0x518cb1580b90d89361b4998d16c498d3d1e93d39fec155f2214eee68154fb72e;
+        keccak256("UPGRADE_AUDITOR_ROLE");
 
     // ====================
     // Initializer
@@ -72,6 +70,10 @@ contract CommodityToken is
         string memory _name,
         string memory _symbol
     ) public initializer onlyProxy {
+        require(
+            initialAdmin != address(0),
+            "CommodityToken: initial admin is zero"
+        );
         __ERC20_init(_name, _symbol);
 
         // including initialize EIP712 domain separator
@@ -113,18 +115,16 @@ contract CommodityToken is
     // Risk Manager Functions
     // ====================
     function freeze(address _account) external onlyProxy {
-        grantRole(FROZEN_ROLE, _account); // Permission validation is implemeted in grantRole function
-        emit Frozen(_account);
+        grantRole(FROZEN_ROLE, _account); // Permission validation is implemented in grantRole function
     }
 
     function unfreeze(address _account) external onlyProxy {
-        revokeRole(FROZEN_ROLE, _account); // Permission validation is implemeted in revokeRole function
-        emit Unfrozen(_account);
+        revokeRole(FROZEN_ROLE, _account); // Permission validation is implemented in revokeRole function
     }
 
+    // @notice Users can self-assign FROZEN_ROLE via selfFreeze() without RISK_MANAGER_ROLE
     function selfFreeze() external onlyProxy {
         _grantRole(FROZEN_ROLE, _msgSender());
-        emit Frozen(_msgSender());
     }
 
     error AccountNotFrozen(address account);
@@ -136,10 +136,14 @@ contract CommodityToken is
         }
         uint256 frozenBalance = balanceOf(_account);
         _updateForWipe(_account, frozenBalance);
+
+        // After wiping the frozen account, nonce for allowances should be increased to reset all allowances
+        _increaseAllowanceNonce(_account);
+
         emit Wiped(_account, frozenBalance);
     }
 
-    function isFrozen(address _account) public view onlyProxy returns (bool) {
+    function isFrozen(address _account) public view returns (bool) {
         return hasRole(FROZEN_ROLE, _account);
     }
 
@@ -220,6 +224,11 @@ contract CommodityToken is
         bytes32 r,
         bytes32 s
     ) external onlyProxy {
+        AuthorizationStorage storage store = _getUsedNoncesStorage();
+        if (store.usedNonces[authorizer][nonce] == true) {
+            revert InvalidAuthorization(authorizer, nonce);
+        }
+
         // Verify Signature
         bytes32 structHash = keccak256(
             abi.encode(
@@ -232,16 +241,15 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer != authorizer) {
             revert InvalidSignature();
         }
 
         // Mark the nonce as used to prevent future use
-        AuthorizationStorage storage store = _getUsedNoncesStorage();
         store.usedNonces[authorizer][nonce] = true;
-        emit AuthorizationUsed(authorizer, nonce);
+        emit AuthorizationCancelled(authorizer, nonce);
     }
 
     error InvalidAuthorization(address authorizer, bytes32 nonce);
@@ -271,6 +279,7 @@ contract CommodityToken is
         uint256 validBefore,
         uint256 currentTime
     );
+    error InvalidTimeframe(uint256 validAfter, uint256 validBefore);
     error InvalidSignature();
 
     function mintWithAuthorization(
@@ -279,13 +288,15 @@ contract CommodityToken is
         bytes32 nonce,
         uint256 validAfter,
         uint256 validBefore,
-        uint256 vaultedWeight,
         uint8 v,
         bytes32 r,
         bytes32 s
     ) external onlyRole(VAULT_MINTER_ROLE) onlyProxy {
         // Check time validity
-        if (block.timestamp < validAfter || block.timestamp > validBefore) {
+        if (validAfter > validBefore) {
+            revert InvalidTimeframe(validAfter, validBefore);
+        }
+        if (block.timestamp <= validAfter || block.timestamp >= validBefore) {
             revert AuthorizationExpired(
                 validAfter,
                 validBefore,
@@ -294,7 +305,7 @@ contract CommodityToken is
         }
 
         // Verify Signature
-        // if parameters are different from those signed data, ecrecover will return a different address
+        // if parameters are different from those signed data, ECDSA.recover will return a different address
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
@@ -309,9 +320,9 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
-        if (!hasRole(MINT_APPROVER_ROLE, signer)) {
+        if (signer == address(0) || !hasRole(MINT_APPROVER_ROLE, signer)) {
             revert InvalidSignature();
         }
 
@@ -324,25 +335,24 @@ contract CommodityToken is
         // Available when signer == approver && msg.sender == MINTER_ROLE
         _mint(to, amount);
         emit Minted(to, amount);
-        emit VaultedWeight(vaultedWeight);
 
         // Mark the nonce as used
         store.usedNonces[signer][nonce] = true;
-        emit AuthorizationUsed(msg.sender, nonce);
+        emit AuthorizationUsed(msg.sender, signer, nonce);
     }
 
     // ====================
     // ERC20 Functions(Public)
     // ====================
-    function name() public view override onlyProxy returns (string memory) {
+    function name() public view override returns (string memory) {
         return super.name();
     }
 
-    function symbol() public view override onlyProxy returns (string memory) {
+    function symbol() public view override returns (string memory) {
         return super.symbol();
     }
 
-    function decimals() public view override onlyProxy returns (uint8) {
+    function decimals() public view override returns (uint8) {
         return super.decimals();
     }
 
@@ -351,33 +361,87 @@ contract CommodityToken is
         address _spender,
         uint256 _amount,
         bool emitEvent
-    ) internal override whenNotPaused onlyProxy {
-        //Frozen Accounts must not be able to approve and to be approved
-        if (isFrozen(_owner)) {
-            revert AccountFrozen(_owner);
-        }
-        if (isFrozen(_spender)) {
-            revert AccountFrozen(_spender);
+    ) internal override onlyProxy {
+        // When amount is zero, it means the approval is being revoked, so we allow it even when paused
+        // For any non-zero approval, the contract must not be paused
+        if (_amount > 0) {
+            _requireNotPaused();
+
+            // Frozen Accounts must not be able to approve and to be approved
+            // Revoking approvals is allowed even the account is frozen
+            if (isFrozen(_owner)) {
+                revert AccountFrozen(_owner);
+            }
+            if (isFrozen(_spender)) {
+                revert AccountFrozen(_spender);
+            }
         }
 
-        super._approve(_owner, _spender, _amount, emitEvent);
+        if (_owner == address(0)) {
+            revert ERC20InvalidApprover(address(0));
+        }
+        if (_spender == address(0)) {
+            revert ERC20InvalidSpender(address(0));
+        }
+
+        AllowanceNonceStorage
+            storage allowanceStorage = _getAllowanceNonceStorage();
+        uint256 currentNonce = allowanceStorage.nonce[_owner];
+        allowanceStorage.allowance[_owner][currentNonce][_spender] = _amount;
+
+        if (emitEvent) {
+            emit Approval(_owner, _spender, _amount);
+        }
     }
 
     function balanceOf(
         address _account
-    ) public view override onlyProxy returns (uint256) {
+    ) public view override returns (uint256) {
         return super.balanceOf(_account);
     }
 
-    function totalSupply() public view override onlyProxy returns (uint256) {
+    function totalSupply() public view override returns (uint256) {
         return super.totalSupply();
+    }
+
+    // When an account is unfrozen, allowances are being reset
+    // Allowance : address user => uint256 nonce => address spender => uint256 amount
+    struct AllowanceNonceStorage {
+        mapping(address => uint256) nonce;
+        mapping(address => mapping(uint256 => mapping(address => uint256))) allowance;
+    }
+
+    // allowanceNonceStorage slot
+    // keccak256(abi.encode(uint256(keccak256(bytes("ALLOWANCE_NONCE_STORAGE"))) - 1)) & ~bytes32(uint256(0xff));
+    bytes32 private constant allowanceNonceStorage =
+        0xea41d1798cd34728e904635e32c4b899afc3c827783776b2bfabce68dbf12100;
+
+    function _getAllowanceNonceStorage()
+        private
+        pure
+        returns (AllowanceNonceStorage storage store)
+    {
+        assembly {
+            store.slot := allowanceNonceStorage
+        }
+    }
+
+    function _increaseAllowanceNonce(address _owner) internal {
+        AllowanceNonceStorage
+            storage allowanceStorage = _getAllowanceNonceStorage();
+        allowanceStorage.nonce[_owner]++;
     }
 
     function allowance(
         address _owner,
         address _spender
-    ) public view override onlyProxy returns (uint256) {
-        return super.allowance(_owner, _spender);
+    ) public view override returns (uint256) {
+        AllowanceNonceStorage
+            storage allowanceStorage = _getAllowanceNonceStorage();
+
+        uint256 currentNonce = allowanceStorage.nonce[_owner];
+
+        return allowanceStorage.allowance[_owner][currentNonce][_spender];
     }
 
     function transfer(
@@ -404,27 +468,65 @@ contract CommodityToken is
     // ====================
     // @notice auditedImpl storage slot
     // keccak256(abi.encode(uint256(keccak256(bytes("AUDITED_IMPL"))) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant auditedImpl =
+    bytes32 private constant AUDITED_IMPL =
         0x3b37ab6d30949955efc7d48c8e307e07fbeac94d91117e502bd889402f542100;
 
-    function getAuditedImpl() public view returns (address impl) {
+    function _getAuditedImplData()
+        internal
+        pure
+        returns (AuditedImpl storage data)
+    {
         assembly {
-            impl := sload(auditedImpl)
+            data.slot := AUDITED_IMPL
         }
-        return impl;
     }
 
-    modifier isAuditedImpl(address _newImpl) {
-        address auditedImplAddr = getAuditedImpl();
+    function getAuditedImplData() external pure returns (AuditedImpl memory) {
+        AuditedImpl storage data = _getAuditedImplData();
+        return data;
+    }
 
-        if (auditedImplAddr != _newImpl) {
-            revert NotAudited(_newImpl);
+    modifier isValidUpgrade(address _newImpl) {
+        AuditedImpl storage data = _getAuditedImplData();
+        if (
+            _newImpl == address(0) ||
+            _newImpl.code.length == 0 ||
+            data.auditedImpl != _newImpl ||
+            data.isUpgraded == true
+        ) {
+            revert InvalidImplementation(_newImpl);
         }
+
+        // msg.sender == upgrader is already validated by onlyRole(UPGRADER_ROLE)
+        // Upgrader should different from the auditor who confirmed the implementation
+        if (data.auditor == msg.sender) {
+            revert InvalidUpgrader();
+        }
+
+        if (
+            data.validBefore < block.timestamp ||
+            data.validAfter > block.timestamp
+        ) {
+            revert InvalidTimeframe(data.validAfter, data.validBefore);
+        }
+
         _;
     }
 
+    function upgradeToAndCall(
+        address newImplementation,
+        bytes memory data
+    ) public payable override onlyProxy {
+        super.upgradeToAndCall(newImplementation, data);
+
+        // After successful upgrade, mark the audited implementation as upgraded to prevent reuse
+        AuditedImpl storage auditedImplData = _getAuditedImplData();
+        auditedImplData.isUpgraded = true;
+    }
+
     // When upgrader is trying to upgrade without auditing, it will revert
-    error NotAudited(address newImpl);
+    error InvalidImplementation(address implementation);
+    error InvalidUpgrader();
 
     function _authorizeUpgrade(
         address _newImplementation
@@ -433,31 +535,60 @@ contract CommodityToken is
         override
         onlyProxy
         onlyRole(UPGRADER_ROLE)
-        isAuditedImpl(_newImplementation)
+        isValidUpgrade(_newImplementation)
     {}
 
     // @notice Update the audited implementation address
     // @dev Only accounts with the UPGRADE_AUDITOR_ROLE can call this function
     // @dev This function allows the upgrade auditor to set the address of the audited implementation contract.
     // @dev This function is not including Updating the implementation itself, only setting the audited address.
+    event AuditedImplUpdated(address oldAuditedImpl, address newAuditedImpl);
+
+    struct AuditedImpl {
+        address auditedImpl;
+        address auditor;
+        uint256 validAfter;
+        uint256 validBefore;
+        bool isUpgraded;
+    }
+
     function updateAuditedImpl(
         address _newImpl
     ) external onlyProxy onlyRole(UPGRADE_AUDITOR_ROLE) {
-        assembly {
-            sstore(auditedImpl, _newImpl)
+        AuditedImpl storage oldAuditedImpl = _getAuditedImplData();
+
+        // @notice When the implementation is never updated before, oldAuditedImpl.auditedImpl is address(0). So only zero address check is enough for the first update.
+        if (_newImpl == address(0) || oldAuditedImpl.auditedImpl == _newImpl) {
+            revert InvalidImplementation(_newImpl);
         }
+
+        address oldImpl = oldAuditedImpl.auditedImpl;
+        uint256 curBlockTimestamp = block.timestamp;
+
+        oldAuditedImpl.auditedImpl = _newImpl;
+        oldAuditedImpl.auditor = msg.sender;
+        oldAuditedImpl.validAfter = curBlockTimestamp;
+        oldAuditedImpl.validBefore = curBlockTimestamp + 3 days; // Valid for 3 days(72hours) after being set as audited implementation
+        oldAuditedImpl.isUpgraded = false;
+
+        emit AuditedImplUpdated(oldImpl, _newImpl);
     }
 
     // ====================
     // EIP3009
     // ====================
-    // keccak256("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
-    bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
-        0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267;
 
-    // keccak256("ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
+    // 0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267;
+    bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
+        keccak256(
+            "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+        );
+
+    // 0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8;
     bytes32 public constant RECEIVE_WITH_AUTHORIZATION_TYPEHASH =
-        0xd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8;
+        keccak256(
+            "ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+        );
 
     function transferWithAuthorization(
         address from,
@@ -471,7 +602,10 @@ contract CommodityToken is
         bytes32 s
     ) external whenNotPaused onlyProxy {
         // check time validity
-        if (block.timestamp < validAfter || block.timestamp > validBefore) {
+        if (validAfter > validBefore) {
+            revert InvalidTimeframe(validAfter, validBefore);
+        }
+        if (block.timestamp <= validAfter || block.timestamp >= validBefore) {
             revert AuthorizationExpired(
                 validAfter,
                 validBefore,
@@ -499,7 +633,7 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer != from) {
             revert InvalidSignature();
@@ -507,7 +641,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[from][nonce] = true;
-        emit AuthorizationUsed(from, nonce);
+        emit AuthorizationUsed(from, signer, nonce);
 
         _transfer(from, to, value);
     }
@@ -530,7 +664,10 @@ contract CommodityToken is
         }
 
         // check time validity
-        if (block.timestamp < validAfter || block.timestamp > validBefore) {
+        if (validAfter > validBefore) {
+            revert InvalidTimeframe(validAfter, validBefore);
+        }
+        if (block.timestamp <= validAfter || block.timestamp >= validBefore) {
             revert AuthorizationExpired(
                 validAfter,
                 validBefore,
@@ -558,7 +695,7 @@ contract CommodityToken is
         );
 
         bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = ecrecover(hash, v, r, s);
+        address signer = ECDSA.recover(hash, v, r, s);
 
         if (signer != from) {
             revert InvalidSignature();
@@ -566,7 +703,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[from][nonce] = true;
-        emit AuthorizationUsed(from, nonce);
+        emit AuthorizationUsed(from, signer, nonce);
 
         _transfer(from, to, value);
     }
@@ -575,10 +712,15 @@ contract CommodityToken is
     // Events
     // ====================
     event Minted(address indexed to, uint256 amount);
-    event VaultedWeight(uint256 vaultedWeight);
     event Burned(address indexed from, uint256 amount);
-    event Frozen(address indexed account);
-    event Unfrozen(address indexed account);
     event Wiped(address indexed account, uint256 amount);
-    event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
+    event AuthorizationUsed(
+        address indexed msgSender,
+        address indexed authorizer,
+        bytes32 indexed nonce
+    );
+    event AuthorizationCancelled(
+        address indexed authorizer,
+        bytes32 indexed nonce
+    );
 }
