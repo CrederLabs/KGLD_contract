@@ -225,12 +225,13 @@ contract RedeemLock is AccessControl {
         string reason
     );
 
-    // @notice : If the order status was changed to "Redeemed" by mistake, the DEFAULT_ADMIN_ROLE can cancel the redeem order
-    // @params : _reason - the reason for cancellation, which will be emitted in the RedeemCancelled event
+    // @notice : If the order status was changed to "Redeemed" by mistake, the ASSET_MANAGER_ROLE can cancel the redeem order
+    // @notice : ASSET_MANAGER_ROLE is managed by Multisig, so off-chain discussion and agreement is required before calling this function
+    // @params _reason The reason for cancellation, which will be emitted in the RedeemCancelled event
     function cancelRedeemedOrder(
         bytes32 orderId,
         string memory _reason
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    ) external onlyRole(ASSET_MANAGER_ROLE) {
         OrderStatus currentStatus = (orders[orderId].status);
         if (currentStatus != OrderStatus.Redeemed) {
             revert InvalidOrderStatus(orderId);
