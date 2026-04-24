@@ -468,27 +468,65 @@ contract CommodityToken is
     // ====================
     // @notice auditedImpl storage slot
     // keccak256(abi.encode(uint256(keccak256(bytes("AUDITED_IMPL"))) - 1)) & ~bytes32(uint256(0xff));
-    bytes32 private constant auditedImpl =
+    bytes32 private constant AUDITED_IMPL =
         0x3b37ab6d30949955efc7d48c8e307e07fbeac94d91117e502bd889402f542100;
 
-    function getAuditedImpl() public view returns (address impl) {
+    function _getAuditedImplData()
+        internal
+        pure
+        returns (AuditedImpl storage data)
+    {
         assembly {
-            impl := sload(auditedImpl)
+            data.slot := AUDITED_IMPL
         }
-        return impl;
     }
 
-    modifier isAuditedImpl(address _newImpl) {
-        address auditedImplAddr = getAuditedImpl();
+    function getAuditedImplData() external pure returns (AuditedImpl memory) {
+        AuditedImpl storage data = _getAuditedImplData();
+        return data;
+    }
 
-        if (auditedImplAddr != _newImpl) {
-            revert NotAudited(_newImpl);
+    modifier isValidUpgrade(address _newImpl) {
+        AuditedImpl storage data = _getAuditedImplData();
+        if (
+            _newImpl == address(0) ||
+            _newImpl.code.length == 0 ||
+            data.auditedImpl != _newImpl ||
+            data.isUpgraded == true
+        ) {
+            revert InvalidImplementation(_newImpl);
         }
+
+        // msg.sender == upgrader is already validated by onlyRole(UPGRADER_ROLE)
+        // Upgrader should different from the auditor who confirmed the implementation
+        if (data.auditor == msg.sender) {
+            revert InvalidUpgrader();
+        }
+
+        if (
+            data.validBefore < block.timestamp ||
+            data.validAfter > block.timestamp
+        ) {
+            revert InvalidTimeframe(data.validAfter, data.validBefore);
+        }
+
         _;
     }
 
+    function upgradeToAndCall(
+        address newImplementation,
+        bytes memory data
+    ) public payable override onlyProxy {
+        super.upgradeToAndCall(newImplementation, data);
+
+        // After successful upgrade, mark the audited implementation as upgraded to prevent reuse
+        AuditedImpl storage auditedImplData = _getAuditedImplData();
+        auditedImplData.isUpgraded = true;
+    }
+
     // When upgrader is trying to upgrade without auditing, it will revert
-    error NotAudited(address newImpl);
+    error InvalidImplementation(address implementation);
+    error InvalidUpgrader();
 
     function _authorizeUpgrade(
         address _newImplementation
@@ -497,7 +535,7 @@ contract CommodityToken is
         override
         onlyProxy
         onlyRole(UPGRADER_ROLE)
-        isAuditedImpl(_newImplementation)
+        isValidUpgrade(_newImplementation)
     {}
 
     // @notice Update the audited implementation address
@@ -506,14 +544,34 @@ contract CommodityToken is
     // @dev This function is not including Updating the implementation itself, only setting the audited address.
     event AuditedImplUpdated(address oldAuditedImpl, address newAuditedImpl);
 
+    struct AuditedImpl {
+        address auditedImpl;
+        address auditor;
+        uint256 validAfter;
+        uint256 validBefore;
+        bool isUpgraded;
+    }
+
     function updateAuditedImpl(
         address _newImpl
     ) external onlyProxy onlyRole(UPGRADE_AUDITOR_ROLE) {
-        address oldAuditedImpl = getAuditedImpl();
-        assembly {
-            sstore(auditedImpl, _newImpl)
+        AuditedImpl storage oldAuditedImpl = _getAuditedImplData();
+
+        // @notice When the implementation is never updated before, oldAuditedImpl.auditedImpl is address(0). So only zero address check is enough for the first update.
+        if (_newImpl == address(0) || oldAuditedImpl.auditedImpl == _newImpl) {
+            revert InvalidImplementation(_newImpl);
         }
-        emit AuditedImplUpdated(oldAuditedImpl, _newImpl);
+
+        address oldImpl = oldAuditedImpl.auditedImpl;
+        uint256 curBlockTimestamp = block.timestamp;
+
+        oldAuditedImpl.auditedImpl = _newImpl;
+        oldAuditedImpl.auditor = msg.sender;
+        oldAuditedImpl.validAfter = curBlockTimestamp;
+        oldAuditedImpl.validBefore = curBlockTimestamp + 3 days; // Valid for 3 days(72hours) after being set as audited implementation
+        oldAuditedImpl.isUpgraded = false;
+
+        emit AuditedImplUpdated(oldImpl, _newImpl);
     }
 
     // ====================
