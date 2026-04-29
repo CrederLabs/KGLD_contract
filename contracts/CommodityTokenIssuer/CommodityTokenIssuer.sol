@@ -486,12 +486,23 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         address _ta, // token address
         address _to, // recipient address
         uint256 _amt // amount to withdraw
-    ) external onlyRole(ASSET_MANAGER_ROLE) {
+    ) external onlyRole(ASSET_MANAGER_ROLE) nonReentrant {
         uint256 feeAmt = cumulatedFees[_ta];
         if (_amt > feeAmt) revert InsufficientCumulatedFees(_ta, _amt, feeAmt);
 
-        cumulatedFees[_ta] = sub256(feeAmt, _amt, true);
+        uint256 balanceBefore = IERC20(_ta).balanceOf(address(this));
+
         IERC20(_ta).safeTransfer(_to, _amt);
+
+        uint256 balanceDelta = sub256(
+            balanceBefore,
+            IERC20(_ta).balanceOf(address(this)),
+            true
+        );
+
+        // updating the cumulated fees after the transfer, in case there are fee-on-transfer or other unexpected tokenomics
+        // reentrancy guard is added for the safety of this step
+        cumulatedFees[_ta] = sub256(feeAmt, balanceDelta, false);
 
         emit FeesWithdrawn(_ta, _to, _amt);
     }
