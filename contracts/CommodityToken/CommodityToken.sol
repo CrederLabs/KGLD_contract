@@ -128,6 +128,8 @@ contract CommodityToken is
     }
 
     error AccountNotFrozen(address account);
+    // @notice Wipe the balance of a frozen account and reset allowances
+    // @notice Only allowances with the frozen account as the owner are reset, allowances with the frozen account as the spender are not affected
     function wipeFrozenAccount(
         address _account
     ) external onlyProxy onlyRole(RISK_MANAGER_ROLE) {
@@ -404,7 +406,7 @@ contract CommodityToken is
         return super.totalSupply();
     }
 
-    // When an account is unfrozen, allowances are being reset
+    // When a frozen account is wiped, allowances are being reset
     // Allowance : address user => uint256 nonce => address spender => uint256 amount
     struct AllowanceNonceStorage {
         mapping(address => uint256) nonce;
