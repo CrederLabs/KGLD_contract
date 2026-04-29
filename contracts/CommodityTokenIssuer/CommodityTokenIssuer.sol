@@ -108,7 +108,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     function setFeeBps(
         uint256 _newFeeBps
     ) external onlyRole(ASSET_MANAGER_ROLE) {
-        if (_newFeeBps > BIAS_POINT_DENOMINATOR) {
+        if (_newFeeBps >= BIAS_POINT_DENOMINATOR) {
             revert FeeTooHigh(_newFeeBps);
         }
         uint256 oldFeeBps = feeBps;
@@ -210,7 +210,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
 
-        // _amtOut is already the truncated output amount.
+        // _amtOut should apply retainingDecimals truncation and fee deduction. : User should receive "_amtOut" or more, but not less.
+
         // Algebraic inverse of:
         // rawAmtOut ~= ((_amtIn - fee) * 10**dOut * _exRateIn) / (10**dIn * _exRateOut)
         //
@@ -221,6 +222,12 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         //           / (10**dOut * _exRateIn * (DENOM - feeBps))
         uint256 scaleIn = 10 ** dIn;
         uint256 scaleOut = 10 ** dOut;
+
+        uint256 step = 10 ** sub256(dOut, _retainingDecimals, true);
+        if (_amtOut % step != 0) {
+            revert InvalidAmountOut();
+        }
+
         uint256 feeDenom = BIAS_POINT_DENOMINATOR - feeBps;
 
         uint256 numerator = _amtOut;
@@ -250,16 +257,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             _retainingDecimals
         );
 
-        while (q.amtOut < _amtOut) {
-            approxAmtIn += 1;
-            q = getAmountOut(
-                _taIn,
-                _taOut,
-                approxAmtIn,
-                _exRateIn,
-                _exRateOut,
-                _retainingDecimals
-            );
+        if (q.amtOut < _amtOut) {
+            revert InvalidAmountOut();
         }
 
         return q;
@@ -278,7 +277,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         }
 
         uint256 fee = Math.mulDiv(_amtIn, feeBps, BIAS_POINT_DENOMINATOR);
-        uint256 amtInAfterFee = sub256(_amtIn, fee);
+        uint256 amtInAfterFee = sub256(_amtIn, fee, true);
 
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
@@ -290,11 +289,12 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             _exRateOut * (10 ** dIn)
         );
 
-        uint256 retainingDecimal = sub256(dOut, _retainingDecimals);
+        uint256 retainingDecimal = sub256(dOut, _retainingDecimals, true);
 
         uint256 _amountOut = sub256(
             rawAmtOut,
-            (rawAmtOut % (10 ** retainingDecimal))
+            (rawAmtOut % (10 ** retainingDecimal)),
+            true
         );
 
         return
@@ -395,7 +395,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 balanceBefore = IERC20(_taIn).balanceOf(address(this));
         IERC20(_taIn).safeTransferFrom(owner, address(this), _amtIn);
         uint256 balanceAfter = IERC20(_taIn).balanceOf(address(this));
-        if (sub256(balanceAfter, balanceBefore) != _amtIn) {
+        if (sub256(balanceAfter, balanceBefore, true) != _amtIn) {
+            // balanceAfter should be greater than balanceBefore
             revert NotAllowedFeeOnTransfer(_taIn);
         }
 
@@ -403,7 +404,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         balanceBefore = IERC20(_taOut).balanceOf(address(this));
         IERC20(_taOut).safeTransfer(owner, quoteData.amtOut);
         balanceAfter = IERC20(_taOut).balanceOf(address(this));
-        if (sub256(balanceBefore, balanceAfter) != quoteData.amtOut) {
+        if (sub256(balanceBefore, balanceAfter, true) != quoteData.amtOut) {
+            // balanceAfter should be less than balanceBefore
             revert NotAllowedFeeOnTransfer(_taOut);
         }
         // 4. Update the cumulated fees
@@ -440,6 +442,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
     error SlippageExceeded(uint256 amountOut, uint256 amountOutMin);
     error InvalidAmount();
+    error InvalidAmountOut();
 
     // ====================
     // Reserve and Fee Management
@@ -447,8 +450,9 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     function getReserve(address _ta) public view returns (uint256) {
         uint256 balance = IERC20(_ta).balanceOf(address(this));
         uint256 fee = cumulatedFees[_ta];
-
-        return sub256(balance, fee);
+        // When balance is less than fee, reserve is considered as zero.
+        // But this case must not happen because the contract should not allow fee withdrawal that exceeds the cumulated fees.
+        return sub256(balance, fee, false);
     }
 
     event ReserveWithdrawn(
@@ -486,7 +490,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 feeAmt = cumulatedFees[_ta];
         if (_amt > feeAmt) revert InsufficientCumulatedFees(_ta, _amt, feeAmt);
 
-        cumulatedFees[_ta] = sub256(feeAmt, _amt);
+        cumulatedFees[_ta] = sub256(feeAmt, _amt, true);
         IERC20(_ta).safeTransfer(_to, _amt);
 
         emit FeesWithdrawn(_ta, _to, _amt);
@@ -501,7 +505,20 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     // ====================
     // Utils
     // ====================
-    function sub256(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a > b ? a - b : 0;
+    error NotAllowedNegativeResult();
+    // @notice Subtracts two unsigned integers and reverts if the result would be negative (i.e., if b > a). If revertWhenNegative is false, it returns 0 instead of reverting when b > a.
+    function sub256(
+        uint256 a,
+        uint256 b,
+        bool revertWhenNegative
+    ) internal pure returns (uint256) {
+        if (a < b) {
+            if (revertWhenNegative) {
+                revert NotAllowedNegativeResult();
+            } else {
+                return 0;
+            }
+        }
+        return a - b;
     }
 }
