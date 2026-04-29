@@ -149,13 +149,16 @@ contract CommodityToken is
         return hasRole(FROZEN_ROLE, _account);
     }
 
-    error FrozenRoleRenounceAttempt();
+    error InvalidRenounceAttempt();
     function renounceRole(
         bytes32 role,
         address callerConfirmation
     ) public override onlyProxy {
         if (role == FROZEN_ROLE) {
-            revert FrozenRoleRenounceAttempt();
+            revert InvalidRenounceAttempt();
+        }
+        if (role == DEFAULT_ADMIN_ROLE) {
+            revert InvalidRenounceAttempt();
         }
         super.renounceRole(role, callerConfirmation);
     }
