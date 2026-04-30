@@ -105,6 +105,8 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
     error FeeTooHigh(uint256 attemptedFeeBps);
     event FeeBpsChanged(uint256 oldFeeBps, uint256 newFeeBps);
+
+    // @notice FeeBps should be less than 100%
     function setFeeBps(
         uint256 _newFeeBps
     ) external onlyRole(ASSET_MANAGER_ROLE) {
@@ -195,6 +197,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     }
 
     error InvalidExchangeRate();
+    // @param _amtOut should apply retainingDecimals truncation and fee deduction. : User should receive "_amtOut" or more, but not less.
     function getAmountIn(
         address _taIn,
         address _taOut,
@@ -209,8 +212,6 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
-
-        // _amtOut should apply retainingDecimals truncation and fee deduction. : User should receive "_amtOut" or more, but not less.
 
         // Algebraic inverse of:
         // rawAmtOut ~= ((_amtIn - fee) * 10**dOut * _exRateIn) / (10**dIn * _exRateOut)
