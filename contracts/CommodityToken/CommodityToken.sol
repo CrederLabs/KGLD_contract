@@ -8,6 +8,10 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
+interface ICommodityTokenProxy {
+    function getImplementation() external view returns (address);
+}
+
 /*
     @title CommodityToken
     @dev ERC20 Token representing real-asset backed token with upgradeability, access control, pausing, and freezing features.
@@ -562,8 +566,13 @@ contract CommodityToken is
     ) external onlyProxy onlyRole(UPGRADE_AUDITOR_ROLE) {
         AuditedImpl storage oldAuditedImpl = _getAuditedImplData();
 
-        // @notice When the implementation is never updated before, oldAuditedImpl.auditedImpl is address(0). So only zero address check is enough for the first update.
-        if (_newImpl == address(0) || oldAuditedImpl.auditedImpl == _newImpl) {
+        // @notice _newImpl should not be zero address and should be different from current implementation to prevent setting the same implementation again
+        if (
+            _newImpl == address(0) ||
+            ICommodityTokenProxy(address(this)).getImplementation() ==
+            _newImpl ||
+            _newImpl.code.length == 0
+        ) {
             revert InvalidImplementation(_newImpl);
         }
 
