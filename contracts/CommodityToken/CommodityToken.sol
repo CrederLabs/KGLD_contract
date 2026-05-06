@@ -655,7 +655,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[from][nonce] = true;
-        emit AuthorizationUsed(from, signer, nonce);
+        emit AuthorizationUsed(msg.sender, signer, nonce);
 
         _transfer(from, to, value);
     }
@@ -717,7 +717,7 @@ contract CommodityToken is
 
         // Mark the nonce as used
         store.usedNonces[from][nonce] = true;
-        emit AuthorizationUsed(from, signer, nonce);
+        emit AuthorizationUsed(msg.sender, signer, nonce);
 
         _transfer(from, to, value);
     }
