@@ -495,17 +495,45 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
         IERC20(_ta).safeTransfer(_to, _amt);
 
-        uint256 balanceDelta = sub256(
-            balanceBefore,
-            IERC20(_ta).balanceOf(address(this)),
-            true
-        );
+        uint256 balanceAfter = IERC20(_ta).balanceOf(address(this));
+        uint256 balanceDelta = sub256(balanceBefore, balanceAfter, true);
 
-        // updating the cumulated fees after the transfer, in case there are fee-on-transfer or other unexpected tokenomics
+        if (balanceDelta != _amt) {
+            // balanceAfter should be less than balanceBefore
+            revert NotAllowedFeeOnTransfer(_ta);
+        }
+
+        // Reject fee-on-transfer or other non-standard token behaviors
         // reentrancy guard is added for the safety of this step
-        cumulatedFees[_ta] = sub256(feeAmt, balanceDelta, false);
+        cumulatedFees[_ta] = sub256(feeAmt, _amt, true);
 
         emit FeesWithdrawn(_ta, _to, _amt);
+    }
+
+    event EmergencyFeeWithdrawal(
+        address indexed tokenAddress,
+        address indexed recipient,
+        uint256 cumulatedFeeAmount,
+        uint256 balanceDelta
+    );
+    // @notice Emergency-only function to withdraw all accumulated fees for a token and reset cumulatedFees to zero.
+    // @dev This function is intended for exceptional cases where normal withdrawFees() cannot be used.
+    //      It intentionally does not enforce balance-delta equality and resets fee accounting to zero.
+    //      The emitted balanceDelta should be reviewed off-chain for monitoring and reconciliation.
+    function emergencyWithdrawFee(
+        address _ta,
+        address _to
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        uint256 feeAmt = cumulatedFees[_ta];
+
+        cumulatedFees[_ta] = 0;
+
+        uint256 balanceBefore = (IERC20(_ta).balanceOf(address(this)));
+        IERC20(_ta).safeTransfer(_to, feeAmt);
+        uint256 balanceAfter = (IERC20(_ta).balanceOf(address(this)));
+        uint256 balanceDelta = sub256(balanceBefore, balanceAfter, true);
+
+        emit EmergencyFeeWithdrawal(_ta, _to, feeAmt, balanceDelta);
     }
 
     // ====================
