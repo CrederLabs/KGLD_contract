@@ -224,7 +224,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 scaleIn = 10 ** dIn;
         uint256 scaleOut = 10 ** dOut;
 
-        uint256 step = 10 ** sub256(dOut, _retainingDecimals, true);
+        uint256 step = 10 ** sub256(dOut, _retainingDecimals);
         if (_amtOut % step != 0) {
             revert InvalidAmountOut();
         }
@@ -278,7 +278,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         }
 
         uint256 fee = Math.mulDiv(_amtIn, feeBps, BIAS_POINT_DENOMINATOR);
-        uint256 amtInAfterFee = sub256(_amtIn, fee, true);
+        uint256 amtInAfterFee = sub256(_amtIn, fee);
 
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
@@ -290,12 +290,11 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             _exRateOut * (10 ** dIn)
         );
 
-        uint256 retainingDecimal = sub256(dOut, _retainingDecimals, true);
+        uint256 retainingDecimal = sub256(dOut, _retainingDecimals);
 
         uint256 _amountOut = sub256(
             rawAmtOut,
-            (rawAmtOut % (10 ** retainingDecimal)),
-            true
+            (rawAmtOut % (10 ** retainingDecimal))
         );
 
         return
@@ -396,7 +395,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 balanceBefore = IERC20(_taIn).balanceOf(address(this));
         IERC20(_taIn).safeTransferFrom(owner, address(this), _amtIn);
         uint256 balanceAfter = IERC20(_taIn).balanceOf(address(this));
-        if (sub256(balanceAfter, balanceBefore, true) != _amtIn) {
+        if (sub256(balanceAfter, balanceBefore) != _amtIn) {
             // balanceAfter should be greater than balanceBefore
             revert NotAllowedFeeOnTransfer(_taIn);
         }
@@ -405,7 +404,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         balanceBefore = IERC20(_taOut).balanceOf(address(this));
         IERC20(_taOut).safeTransfer(owner, quoteData.amtOut);
         balanceAfter = IERC20(_taOut).balanceOf(address(this));
-        if (sub256(balanceBefore, balanceAfter, true) != quoteData.amtOut) {
+        if (sub256(balanceBefore, balanceAfter) != quoteData.amtOut) {
             // balanceAfter should be less than balanceBefore
             revert NotAllowedFeeOnTransfer(_taOut);
         }
@@ -453,7 +452,9 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 fee = cumulatedFees[_ta];
         // When balance is less than fee, reserve is considered as zero.
         // But this case must not happen because the contract should not allow fee withdrawal that exceeds the cumulated fees.
-        return sub256(balance, fee, false);
+        if (balance <= fee) {
+            return 0;
+        } else return sub256(balance, fee);
     }
 
     event ReserveWithdrawn(
@@ -496,7 +497,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         IERC20(_ta).safeTransfer(_to, _amt);
 
         uint256 balanceAfter = IERC20(_ta).balanceOf(address(this));
-        uint256 balanceDelta = sub256(balanceBefore, balanceAfter, true);
+        uint256 balanceDelta = sub256(balanceBefore, balanceAfter);
 
         if (balanceDelta != _amt) {
             // balanceAfter should be less than balanceBefore
@@ -505,7 +506,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
 
         // Reject fee-on-transfer or other non-standard token behaviors
         // reentrancy guard is added for the safety of this step
-        cumulatedFees[_ta] = sub256(feeAmt, _amt, true);
+        cumulatedFees[_ta] = sub256(feeAmt, _amt);
 
         emit FeesWithdrawn(_ta, _to, _amt);
     }
@@ -531,7 +532,7 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         uint256 balanceBefore = (IERC20(_ta).balanceOf(address(this)));
         IERC20(_ta).safeTransfer(_to, feeAmt);
         uint256 balanceAfter = (IERC20(_ta).balanceOf(address(this)));
-        uint256 balanceDelta = sub256(balanceBefore, balanceAfter, true);
+        uint256 balanceDelta = sub256(balanceBefore, balanceAfter);
 
         emit EmergencyFeeWithdrawal(_ta, _to, feeAmt, balanceDelta);
     }
@@ -547,17 +548,9 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
     // ====================
     error NotAllowedNegativeResult();
     // @notice Subtracts two unsigned integers and reverts if the result would be negative (i.e., if b > a). If revertWhenNegative is false, it returns 0 instead of reverting when b > a.
-    function sub256(
-        uint256 a,
-        uint256 b,
-        bool revertWhenNegative
-    ) internal pure returns (uint256) {
+    function sub256(uint256 a, uint256 b) internal pure returns (uint256) {
         if (a < b) {
-            if (revertWhenNegative) {
-                revert NotAllowedNegativeResult();
-            } else {
-                return 0;
-            }
+            revert NotAllowedNegativeResult();
         }
         return a - b;
     }
