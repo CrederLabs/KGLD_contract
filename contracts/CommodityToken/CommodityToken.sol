@@ -192,7 +192,7 @@ contract CommodityToken is
     function _updateForWipe(
         address _account,
         uint256 _amount
-    ) internal whenNotPaused onlyProxy {
+    ) internal onlyProxy {
         super._update(_account, address(0), _amount);
     }
 
