@@ -1,0 +1,7 @@
+node_modules
+Mockups
+testScripts
+hardhat.config.js
+artifacts
+cache
+.env
