@@ -39,6 +39,10 @@ contract CommodityTokenProxy is Proxy {
 
     function _setImplementation(address newImplementation) private {
         bytes32 slot = _IMPLEMENTATION_SLOT;
+        require(
+            newImplementation.code.length > 0,
+            "UUPSProxy: new implementation has no code"
+        );
         assembly {
             sstore(slot, newImplementation)
         }

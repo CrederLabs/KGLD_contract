@@ -2,13 +2,13 @@
 
 ## CommodityToken
 
-- CommodityToken.sol(sha256 : e25aa483c06d9e6c3abdb6795d0c5b63e9ccead059691c1cb6ffcb5fe7baa267)
-- CommodityTokenProxy.sol(sha256 : 4f21f71eb39568fbc27edf81d7b47e171e39e888d2766adbd5b98599f40004ee)
+- CommodityToken.sol(sha256 : d25594d719f17919243ad755bef009f55706f3e1e606baacf93b84bfb57b7932)
+- CommodityTokenProxy.sol(sha256 : af5ad9a2811e5c0cfe9eaf1dfc46fb47bbac97838ea549a8a0d5d902bfbaeb40)
 
-## CommodityTokenIssuer (v0.0.7)
+## CommodityTokenIssuer
 
-- CommodityTokenIssuer.sol(sha256 : b6ea89c0c208052a73f0eb1ef81b88b4397a17adf2e895df5dcb60bc39200beb)
+- CommodityTokenIssuer.sol(sha256 : 7535bd8565347f7dbc83171a628f9fac0efd87e282081b4d5c4c8294c0fed13e)
 
 ## RedeemLock
 
-- RedeemLock.sol(sha256 : 986f9cc852ec6685ad32e6c347cba90bee54934566cdba3b9df31e778f480836)
+- RedeemLock.sol(sha256 : 28e3aa9ca4616ca21164368bebffaf17f064c511abb6bd461ea06166661eb783)
