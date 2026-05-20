@@ -209,61 +209,41 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
         if (_exRateIn == 0 || _exRateOut == 0) {
             revert InvalidExchangeRate();
         }
+        if (_amtOut == 0) {
+            revert InvalidAmountOut();
+        }
 
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
 
-        // Algebraic inverse of:
-        // rawAmtOut ~= ((_amtIn - fee) * 10**dOut * _exRateIn) / (10**dIn * _exRateOut)
-        //
-        // and approximating:
-        // (_amtIn - fee) ~= _amtIn * (DENOM - feeBps) / DENOM
-        //
-        // => amtIn ~= (_amtOut * 10**dIn * _exRateOut * DENOM)
-        //           / (10**dOut * _exRateIn * (DENOM - feeBps))
-        uint256 scaleIn = 10 ** dIn;
-        uint256 scaleOut = 10 ** dOut;
-
         uint256 step = 10 **
-            (dOut > _retainingDecimals ? dOut - _retainingDecimals : 0);
-
+            (dOut > _retainingDecimals ? (dOut - _retainingDecimals) : 0);
         if (_amtOut % step != 0) {
             revert InvalidAmountOut();
         }
 
-        // feeBps is verified to be less than 100% in setFeeBps(), so feeDenom cannot be less or equal to zero.
-        uint256 feeDenom = BIAS_POINT_DENOMINATOR - feeBps;
+        uint256 net = Math.mulDiv(
+            Math.mulDiv(_amtOut, 10 ** dIn, 1),
+            _exRateOut,
+            _exRateIn * (10 ** dOut),
+            Math.Rounding.Ceil
+        );
 
-        uint256 numerator = _amtOut;
-        numerator = Math.mulDiv(numerator, scaleIn, 1);
-        numerator = Math.mulDiv(numerator, _exRateOut, 1);
-        numerator = Math.mulDiv(numerator, BIAS_POINT_DENOMINATOR, 1);
+        uint256 amtIn = Math.mulDiv(
+            net,
+            BIAS_POINT_DENOMINATOR + feeBps,
+            BIAS_POINT_DENOMINATOR,
+            Math.Rounding.Ceil
+        );
 
-        uint256 denominator = scaleOut;
-        denominator = Math.mulDiv(denominator, _exRateIn, 1);
-        denominator = Math.mulDiv(denominator, feeDenom, 1);
-
-        uint256 approxAmtIn = numerator / denominator;
-        if (numerator % denominator != 0) {
-            approxAmtIn += 1;
-        }
-
-        // Verification step:
-        // Because getAmountOut() includes floor rounding and retainingDecimals truncation,
-        // the algebraic inverse may still be slightly low. Revert if the calculated input
-        // does not produce at least the requested output.
         QuoteData memory q = getAmountOut(
             _taIn,
             _taOut,
-            approxAmtIn,
+            amtIn,
             _exRateIn,
             _exRateOut,
             _retainingDecimals
         );
-
-        if (q.amtOut < _amtOut) {
-            revert InvalidAmountOut();
-        }
 
         return q;
     }
@@ -280,23 +260,25 @@ contract CommodityTokenIssuer is AccessControl, ReentrancyGuard {
             revert InvalidExchangeRate();
         }
 
-        uint256 fee = Math.mulDiv(_amtIn, feeBps, BIAS_POINT_DENOMINATOR);
-        uint256 amtInAfterFee = _amtIn - fee;
+        uint256 net = Math.mulDiv(
+            _amtIn,
+            BIAS_POINT_DENOMINATOR,
+            BIAS_POINT_DENOMINATOR + feeBps
+        );
+        uint256 fee = _amtIn - net;
 
         uint256 dIn = uint256(IERC20Metadata(_taIn).decimals());
         uint256 dOut = uint256(IERC20Metadata(_taOut).decimals());
 
-        // The full calculation is: ((_amtIn - fee) * 10 ** dOut * _exRateIn) / (10 ** dIn * _exRateOut)
         uint256 rawAmtOut = Math.mulDiv(
-            Math.mulDiv(amtInAfterFee, 10 ** dOut, 1),
+            Math.mulDiv(net, 10 ** dOut, 1),
             _exRateIn,
-            _exRateOut * (10 ** dIn)
+            Math.mulDiv(_exRateOut, 10 ** dIn, 1)
         );
 
-        uint256 retainingDecimal = (
-            dOut > _retainingDecimals ? dOut - _retainingDecimals : 0
-        );
-
+        uint256 retainingDecimal = dOut > _retainingDecimals
+            ? dOut - _retainingDecimals
+            : 0;
         uint256 _amountOut = rawAmtOut - (rawAmtOut % (10 ** retainingDecimal));
 
         return
