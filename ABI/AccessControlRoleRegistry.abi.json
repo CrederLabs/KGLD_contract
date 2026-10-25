@@ -5,16 +5,6 @@
         "internalType": "address",
         "name": "initialAdmin",
         "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "initialTimelock",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "acceptanceWindow",
-        "type": "uint256"
       }
     ],
     "stateMutability": "nonpayable",
@@ -84,11 +74,6 @@
   {
     "inputs": [],
     "name": "GlobalTargetForbidden",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidAcceptanceWindow",
     "type": "error"
   },
   {
@@ -168,25 +153,6 @@
       }
     ],
     "name": "DefaultAdminUpdateStaged",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "timelock",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "validAfter",
-        "type": "uint256"
-      }
-    ],
-    "name": "DefaultAdminUpdateTimelockScheduled",
     "type": "event"
   },
   {
@@ -328,12 +294,38 @@
   },
   {
     "inputs": [],
+    "name": "DEFAULT_ADMIN_ACCEPTANCE_WINDOW",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "DEFAULT_ADMIN_ROLE",
     "outputs": [
       {
         "internalType": "bytes32",
         "name": "",
         "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "DEFAULT_ADMIN_UPDATE_TIMELOCK",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -388,7 +380,7 @@
         "type": "uint256"
       }
     ],
-    "stateMutability": "view",
+    "stateMutability": "pure",
     "type": "function"
   },
   {
@@ -401,7 +393,7 @@
         "type": "uint256"
       }
     ],
-    "stateMutability": "view",
+    "stateMutability": "pure",
     "type": "function"
   },
   {
@@ -635,32 +627,6 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "pendingDefaultAdminUpdateTimelock",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "pendingDefaultAdminUpdateTimelockValidAfter",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "bytes32",
@@ -764,19 +730,6 @@
       }
     ],
     "name": "revokeRole",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "timelock",
-        "type": "uint256"
-      }
-    ],
-    "name": "setDefaultAdminUpdateTimelock",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

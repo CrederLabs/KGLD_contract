@@ -11,6 +11,9 @@ import {
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {PolicyRegistryClientUpgradeable} from "../policyRegistry/PolicyRegistryClientUpgradeable.sol";
+import {IPolicyRegistry} from "../policyRegistry/IPolicyRegistry.sol";
+import {IRoleAdminPolicyRegistry} from "../policyRegistry/IRoleAdminPolicyRegistry.sol";
+import {ITreasury} from "../controller/ITreasury.sol";
 
 interface ITreasuryBurnableToken {
     function burn(uint256 amount) external;
@@ -19,11 +22,11 @@ interface ITreasuryBurnableToken {
 /// @notice Custody with per-token bucket accounting; buckets are not user balances.
 /// @dev Initialize through TreasuryProxy with the shared registries. Supports exact-amount ERC-20
 /// transfers only; fee-on-transfer and rebasing tokens are not supported.
-contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable {
+contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable, ITreasury {
     using SafeERC20 for IERC20;
 
     // DEFAULT_ADMIN_ROLE is inherited from RoleRegistryClientUpgradeable.
-    // Its global holders may replace registries and configure upgrade timing.
+    // Its global holder may acknowledge a backing deficit by writing off bucket allocations.
     // The roles below accept global or Treasury-proxy-local grants.
 
     /// @notice Deposits its own tokens, allocates unallocated holdings, withdraws, moves buckets and burns assets.
@@ -45,6 +48,11 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
     /// @notice Virtual bucket for unallocated holdings; only valid as a bucketTransfer source.
     bytes32 public constant UNALLOCATED_BUCKET = bytes32(0);
 
+    // Registry built-ins have no administrator; bindings require both expected admin values to be zero.
+    uint64 private constant ALWAYS_ALLOW_POLICY = 0;
+    uint64 private constant ALWAYS_BLOCK_POLICY =
+        (uint64(IPolicyRegistry.PolicyType.ALLOWLIST) << 56) | 1;
+
     /// @custom:storage-location erc7201:kgold.storage.Treasury
     struct TreasuryStorage {
         // Only regular buckets have stored balances; use bucketUnallocated for the virtual bucket.
@@ -63,9 +71,12 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
     error InvalidToken(address token);
     error InvalidAccount(address account);
     error InvalidBucket(bytes32 bucket);
+    error ZeroAmount();
     error SameBucketNotAllowed(bytes32 bucket);
     error WithdrawPolicyRequired(bytes32 bucket);
     error BucketAccessDenied(bytes32 bucket, address account);
+    error InvalidPolicyAdminArguments();
+    error PolicyAdminMismatch(uint64 policyId);
     error InsufficientBucketBalance(
         address token,
         bytes32 bucket,
@@ -82,6 +93,9 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         uint256 balance,
         uint256 allocated
     );
+    error EmptyLossBuckets();
+    error NoBackingDeficit(address token, uint256 balance, uint256 allocated);
+    error UncoveredBackingDeficit(address token, uint256 remainingDeficit);
     error UnexpectedTokenBalance(
         address token,
         address account,
@@ -121,6 +135,18 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         bytes32 indexed bucket,
         uint256 amount,
         address operator
+    );
+    event BucketAllocationWrittenOff(
+        address indexed token,
+        bytes32 indexed bucket,
+        uint256 amount,
+        address operator
+    );
+    event BucketAllocatedRepaired(
+        address indexed token,
+        uint256 oldAllocated,
+        uint256 newAllocated,
+        address indexed operator
     );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -166,32 +192,73 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
     }
 
     /// @notice Binds a withdrawal policy; zero removes the bucket's withdrawal authority.
-    function setBucketWithdrawPolicy(bytes32 bucket, uint64 policyId)
+    /// @dev Checks the expected administrator; see _checkPolicyAdmin for argument conventions.
+    function setBucketWithdrawPolicy(
+        bytes32 bucket, uint64 policyId, address expectedAdmin, bytes32 expectedAdminRole
+    )
         external onlyProxy nonReentrant onlyRole(TREASURY_RISK_MANAGER_ROLE)
     {
+        _checkPolicyAdmin(policyId, expectedAdmin, expectedAdminRole);
         _setBucketPolicy(getBucketPolicyKey(bucket, WITHDRAW), policyId);
     }
 
     /// @notice Binds a deposit policy; zero restores the default permission for managers.
-    function setBucketDepositPolicy(bytes32 bucket, uint64 policyId)
+    /// @dev Checks the expected administrator; see _checkPolicyAdmin for argument conventions.
+    function setBucketDepositPolicy(
+        bytes32 bucket, uint64 policyId, address expectedAdmin, bytes32 expectedAdminRole
+    )
         external onlyProxy nonReentrant onlyRole(TREASURY_RISK_MANAGER_ROLE)
     {
+        _checkPolicyAdmin(policyId, expectedAdmin, expectedAdminRole);
         _setBucketPolicy(getBucketPolicyKey(bucket, DEPOSIT), policyId);
     }
 
     /// @notice Sets the policy whose authorized managers may access every bucket.
     /// @dev Zero disables this override; policy types, including blocklists, are unrestricted.
-    function setAllBucketsPolicy(uint64 policyId)
+    /// Checks the expected administrator; see _checkPolicyAdmin for argument conventions.
+    function setAllBucketsPolicy(uint64 policyId, address expectedAdmin, bytes32 expectedAdminRole)
         external onlyProxy nonReentrant onlyRole(TREASURY_RISK_MANAGER_ROLE)
     {
-        _checkPolicyExists(policyId);
+        _checkPolicyAdmin(policyId, expectedAdmin, expectedAdminRole);
         TreasuryStorage storage $ = _getTreasuryStorage();
         uint64 oldPolicyId = $.allBucketsPolicyId;
         $.allBucketsPolicyId = policyId;
         emit AllBucketsPolicyUpdated(oldPolicyId, policyId);
     }
 
-    function _setBucketPolicy(bytes32 bucketKey, uint64 policyId) private {
+    /// @dev Address policies require (admin, 0); role policies require (address(0), adminRole).
+    /// A zero adminRole is DEFAULT_ADMIN_ROLE. Built-ins require (address(0), bytes32(0)).
+    /// Checks only the current administrator, not creation provenance, members or composite children.
+    /// Use the ID from the actual creation receipt or same-transaction return value, never a predicted ID.
+    function _checkPolicyAdmin(
+        uint64 policyId, address expectedAdmin, bytes32 expectedAdminRole
+    ) internal view {
+        if (expectedAdmin != address(0) && expectedAdminRole != bytes32(0)) {
+            revert InvalidPolicyAdminArguments();
+        }
+
+        _checkPolicyExists(policyId);
+
+        if (policyId == ALWAYS_ALLOW_POLICY || policyId == ALWAYS_BLOCK_POLICY) {
+            if (expectedAdmin != address(0) || expectedAdminRole != bytes32(0)) {
+                revert InvalidPolicyAdminArguments();
+            }
+            return;
+        }
+
+        IRoleAdminPolicyRegistry registry = IRoleAdminPolicyRegistry(address(policyRegistry()));
+        if (expectedAdmin != address(0)) {
+            if (registry.isRolePolicy(policyId) || registry.policyAdmin(policyId) != expectedAdmin) {
+                revert PolicyAdminMismatch(policyId);
+            }
+        } else {
+            if (!registry.isRolePolicy(policyId) || registry.policyAdminRole(policyId) != expectedAdminRole) {
+                revert PolicyAdminMismatch(policyId);
+            }
+        }
+    }
+
+    function _setBucketPolicy(bytes32 bucketKey, uint64 policyId) internal {
         _checkPolicyExists(policyId);
         TreasuryStorage storage $ = _getTreasuryStorage();
         uint64 oldPolicyId = $.bucketPolicyIds[bucketKey];
@@ -205,7 +272,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         address token,
         bytes32 bucket,
         uint256 amount
-    ) external onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
+    ) external override onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
         _deposit(token, bucket, amount);
     }
 
@@ -215,7 +282,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         address token,
         bytes32 bucket,
         uint256 amount
-    ) external onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
+    ) external override onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
         _withdraw(depositTo, token, bucket, amount);
     }
 
@@ -230,14 +297,15 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         address withdrawToken,
         bytes32 withdrawBucket,
         uint256 withdrawAmount
-    ) external onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
+    ) external override onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
         if (depositBucket == withdrawBucket) revert SameBucketNotAllowed(depositBucket);
         _deposit(depositToken, depositBucket, depositAmount);
         _withdraw(withdrawTo, withdrawToken, withdrawBucket, withdrawAmount);
     }
 
-    function _deposit(address token, bytes32 bucket, uint256 amount) private {
+    function _deposit(address token, bytes32 bucket, uint256 amount) internal {
         _checkRegularBucket(bucket);
+        if (amount == 0) revert ZeroAmount();
         address depositFrom = _msgSender();
         _checkDepositPolicy(bucket, _msgSender());
 
@@ -251,9 +319,10 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         emit Deposited(token, bucket, depositFrom, amount, _msgSender());
     }
 
-    function _withdraw(address depositTo, address token, bytes32 bucket, uint256 amount) private {
+    function _withdraw(address depositTo, address token, bytes32 bucket, uint256 amount) internal {
         _checkRegularBucket(bucket);
-        if (depositTo == address(0) || depositTo == address(this))
+        if (amount == 0) revert ZeroAmount();
+        if (depositTo == address(0) || depositTo == address(this) || depositTo == token)
             revert InvalidAccount(depositTo);
         _checkWithdrawPolicy(bucket, _msgSender());
         uint256 balance = _backedBalance(token);
@@ -275,8 +344,10 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         bytes32 bucketFrom,
         bytes32 bucketTo,
         uint256 amount
-    ) public onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
+    ) public override onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
         _checkRegularBucket(bucketTo);
+        if (bucketFrom == bucketTo) revert SameBucketNotAllowed(bucketFrom);
+        if (amount == 0) revert ZeroAmount();
         _checkWithdrawPolicy(bucketFrom, _msgSender());
         _checkDepositPolicy(bucketTo, _msgSender());
         uint256 balance = _backedBalance(token);
@@ -306,8 +377,9 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         address token,
         bytes32 bucket,
         uint256 amount
-    ) external onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
+    ) external override onlyProxy nonReentrant onlyRole(TREASURY_MANAGER_ROLE) {
         _checkRegularBucket(bucket);
+        if (amount == 0) revert ZeroAmount();
         _checkWithdrawPolicy(bucket, _msgSender());
         uint256 balance = _backedBalance(token);
         _debitBucket(token, bucket, amount);
@@ -316,6 +388,46 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         ITreasuryBurnableToken(token).burn(amount);
         _requireBalance(token, address(this), balance - amount);
         emit BucketBurned(token, bucket, amount, _msgSender());
+    }
+
+    /// @notice Writes off a backing deficit from the supplied buckets in priority order.
+    /// @dev Global default admin only; bucket policies are not consulted. No tokens move.
+    /// The deficit is computed from the actual balance, never supplied by the caller.
+    /// Zero-balance/duplicate buckets contribute only their remaining allocation. Every supplied
+    /// bucket must be regular, even after the deficit is covered. Insufficient coverage
+    /// reverts all deductions and events. Controller redemption obligations are unchanged.
+    /// @param token Token whose actual Treasury balance is below its total allocation.
+    /// @param lossBuckets Nonempty ordered list of regular buckets bearing the loss.
+    function emergencyRepairBucketAllocated(
+        address token,
+        bytes32[] calldata lossBuckets
+    ) external onlyProxy nonReentrant {
+        _checkDefaultAdmin(_msgSender());
+        if (token.code.length == 0) revert InvalidToken(token);
+        if (lossBuckets.length == 0) revert EmptyLossBuckets();
+
+        TreasuryStorage storage $ = _getTreasuryStorage();
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 allocated = $.bucketAllocated[token];
+        if (balance >= allocated) revert NoBackingDeficit(token, balance, allocated);
+        uint256 remainingDeficit = allocated - balance;
+
+        for (uint256 i; i < lossBuckets.length; ++i) {
+            bytes32 bucket = lossBuckets[i];
+            _checkRegularBucket(bucket);
+            if (remainingDeficit == 0) continue;
+
+            uint256 available = $.bucketAmount[token][bucket];
+            uint256 loss = available < remainingDeficit ? available : remainingDeficit;
+            if (loss == 0) continue;
+            $.bucketAmount[token][bucket] = available - loss;
+            remainingDeficit -= loss;
+            emit BucketAllocationWrittenOff(token, bucket, loss, _msgSender());
+        }
+
+        if (remainingDeficit != 0) revert UncoveredBackingDeficit(token, remainingDeficit);
+        $.bucketAllocated[token] = balance;
+        emit BucketAllocatedRepaired(token, allocated, balance, _msgSender());
     }
 
     // Fixed durations; retain the existing constant getter names for ABI compatibility.
@@ -374,6 +486,12 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
     }
 
     /// @notice Stages the exact implementation and migration calldata for execution after the timelock.
+    /// @dev Before staging, verify that the migration omits nonReentrant: finalizeUpgrade holds
+    /// the shared guard during its delegatecall. The migration must use reinitializer(n) with
+    /// a fresh version, onlyRole(UPGRADER_ROLE), and require _getTreasuryUpgradeStorage().finalizing.
+    /// The delegatecall preserves the upgrader as msg.sender. Use internal helpers instead of
+    /// guarded public/external entry points; callbacks into those entry points remain blocked.
+    /// No migration is provided here; add one in a future implementation when state changes require it.
     function stageNewImplementation(address newImplementation, bytes calldata data)
         external onlyProxy nonReentrant onlyRole(UPGRADER_ROLE)
     {
@@ -431,31 +549,32 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         revert DirectUpgradeDisabled();
     }
 
+    /// @dev finalizeUpgrade checks proxy context and upgrader authority before entering the UUPS upgrade path.
     function _authorizeUpgrade(address newImplementation)
-        internal view override onlyProxy onlyRole(UPGRADER_ROLE)
+        internal view override
     {
         TreasuryUpgradeStorage storage $ = _getTreasuryUpgradeStorage();
         if (!$.finalizing || $.pending.implementation != newImplementation)
             revert InvalidImplementation(newImplementation);
     }
 
-    function _getTreasuryStorage() private pure returns (TreasuryStorage storage $) {
+    function _getTreasuryStorage() internal pure returns (TreasuryStorage storage $) {
         assembly {
             $.slot := TREASURY_STORAGE
         }
     }
 
-    function _getTreasuryUpgradeStorage() private pure returns (TreasuryUpgradeStorage storage $) {
+    function _getTreasuryUpgradeStorage() internal pure returns (TreasuryUpgradeStorage storage $) {
         assembly {
             $.slot := TREASURY_UPGRADE_STORAGE
         }
     }
 
-    function _checkRegularBucket(bytes32 bucket) private pure {
+    function _checkRegularBucket(bytes32 bucket) internal pure {
         if (bucket == UNALLOCATED_BUCKET) revert InvalidBucket(bucket);
     }
 
-    function _checkDepositPolicy(bytes32 bucket, address account) private view {
+    function _checkDepositPolicy(bytes32 bucket, address account) internal view {
         TreasuryStorage storage $ = _getTreasuryStorage();
         uint64 policyId = $.bucketPolicyIds[getBucketPolicyKey(bucket, DEPOSIT)];
         if (policyId == 0) return;
@@ -467,7 +586,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         ) revert BucketAccessDenied(bucket, account);
     }
 
-    function _checkWithdrawPolicy(bytes32 bucket, address account) private view {
+    function _checkWithdrawPolicy(bytes32 bucket, address account) internal view {
         TreasuryStorage storage $ = _getTreasuryStorage();
         uint64 policyId = $.bucketPolicyIds[getBucketPolicyKey(bucket, WITHDRAW)];
         if (
@@ -481,7 +600,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         }
     }
 
-    function _policyAuthorizes(uint64 policyId, address account) private view returns (bool) {
+    function _policyAuthorizes(uint64 policyId, address account) internal view returns (bool) {
         // Zero grants no global override or withdrawal permission; deposits handle zero separately.
         if (policyId == 0) return false;
         // Unknown BLOCKLIST IDs authorize in the registry; never query them directly.
@@ -491,7 +610,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
 
     function _backedBalance(
         address token
-    ) private view returns (uint256 balance) {
+    ) internal view returns (uint256 balance) {
         if (token.code.length == 0) revert InvalidToken(token);
         balance = IERC20(token).balanceOf(address(this));
         uint256 allocated = bucketAllocated(token);
@@ -503,7 +622,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         address token,
         address account,
         uint256 expected
-    ) private view {
+    ) internal view {
         uint256 actual = IERC20(token).balanceOf(account);
         if (actual != expected)
             revert UnexpectedTokenBalance(token, account, expected, actual);
@@ -513,7 +632,7 @@ contract Treasury is PolicyRegistryClientUpgradeable, ReentrancyGuardUpgradeable
         address token,
         bytes32 bucket,
         uint256 amount
-    ) private {
+    ) internal {
         TreasuryStorage storage $ = _getTreasuryStorage();
         uint256 available = $.bucketAmount[token][bucket];
         if (amount > available)

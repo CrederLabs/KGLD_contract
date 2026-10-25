@@ -13,7 +13,7 @@ import {IRoleRegistry} from "./IRoleRegistry.sol";
 abstract contract RoleRegistryClient is Context {
     bytes32 public constant DEFAULT_ADMIN_ROLE = bytes32(0);
 
-    IRoleRegistry private _roleRegistry;
+    IRoleRegistry private immutable _roleRegistry;
 
     /// @notice The registry has no deployed code or its default admin query is invalid or zero.
     error InvalidRoleRegistry(address registry);
@@ -42,7 +42,7 @@ abstract contract RoleRegistryClient is Context {
     }
 
     /// @notice Returns the Registry currently used for membership checks.
-    function roleRegistry() public view returns (IRoleRegistry) {
+    function roleRegistry() public view virtual returns (IRoleRegistry) {
         return _roleRegistry;
     }
 
@@ -61,10 +61,4 @@ abstract contract RoleRegistryClient is Context {
         }
     }
 
-    /// @dev Checks global default-admin membership for the consumer's admin operations.
-    function _checkDefaultAdmin(address account) internal view {
-        if (!roleRegistry().hasRoleFor(address(0), DEFAULT_ADMIN_ROLE, account)) {
-            revert AccessControlUnauthorizedAccount(account, DEFAULT_ADMIN_ROLE);
-        }
-    }
 }

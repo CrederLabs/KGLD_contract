@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {RoleRegistryClient} from "../roleRegistry/RoleRegistryClient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {
     IERC20Permit
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
@@ -28,7 +29,7 @@ import {ISignatureTransfer} from "./ISignatureTransfer.sol";
 contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    /// @notice Signs quotes after the server completes its off-chain customer checks.
+    /// @notice Signs quotes after off-chain customer checks and invalidates any unused quote ID.
     bytes32 public constant QUOTE_SIGNER_ROLE = keccak256("QUOTE_SIGNER_ROLE");
     /// @notice Configures daily Treasury withdrawal limits and price validators for each token pair.
     bytes32 public constant CONTROLLER_RISK_MANAGER_ROLE = keccak256("CONTROLLER_RISK_MANAGER_ROLE");
@@ -150,7 +151,7 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
     mapping(address tokenIn => mapping(address tokenOut => address))
         public validationContract;
 
-    /// @notice Quote IDs are single-use across trade and redemption entry points.
+    /// @notice Quote IDs are single-use across trade, redemption and invalidation entry points.
     mapping(bytes32 quoteId => bool) public consumed;
     /// @notice Physical redemption locks keyed by quote ID. Unregistered IDs return RedeemStatus.None.
     mapping(bytes32 quoteId => RedeemData) public redeemData;
@@ -185,6 +186,8 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
         uint256 expected,
         uint256 actual
     );
+    error InvalidRecipient(address to);
+    error ZeroAmount();
 
     event WithdrawLimitUpdated(
         address indexed token,
@@ -203,6 +206,7 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
         address indexed quoteSigner,
         TradeQuote quote
     );
+    event QuoteInvalidated(bytes32 indexed quoteId, address indexed caller);
     event RedeemLocked(
         bytes32 indexed quoteId,
         address indexed owner,
@@ -225,6 +229,13 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
         uint256 extraCost,
         address manager
     );
+    event ERC20Rescued(
+        address indexed token,
+        address indexed to,
+        uint256 amount,
+        address indexed admin
+    );
+    event ETHRescued(address indexed to, uint256 amount, address indexed admin);
 
     constructor(
         address roleRegistry_,
@@ -266,6 +277,36 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
         );
     }
 
+    /// @notice Recovers tokens sent directly to this Controller to an admin-selected recipient.
+    /// @dev Settlement restores the starting token balance; redemption locks are held by Treasury.
+    /// nonReentrant prevents recovery while settlement or another recovery is in progress.
+    /// The registry forbids local DEFAULT_ADMIN_ROLE grants, so only its global admin may call.
+    function rescueERC20(
+        address token,
+        address to,
+        uint256 amount
+    ) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (token.code.length == 0) revert InvalidContract(token);
+        if (to == address(0) || to == address(this) || to == token)
+            revert InvalidRecipient(to);
+        if (amount == 0) revert ZeroAmount();
+        IERC20(token).safeTransfer(to, amount);
+        emit ERC20Rescued(token, to, amount, _msgSender());
+    }
+
+    /// @notice Recovers ETH forced into this Controller without executing a payable entry point.
+    /// @dev Ordinary ETH transfers remain unsupported. sendValue reverts on insufficient balance
+    /// or recipient failure; the shared guard prevents callbacks into settlement or recovery.
+    function rescueETH(
+        address payable to,
+        uint256 amount
+    ) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (to == address(0) || to == address(this)) revert InvalidRecipient(to);
+        if (amount == 0) revert ZeroAmount();
+        Address.sendValue(to, amount);
+        emit ETHRescued(to, amount, _msgSender());
+    }
+
     /// @notice Returns today's aggregate withdrawal usage; stale stored usage is reported as zero.
     function withdrawnToday(address token) public view returns (uint256) {
         WithdrawUsage storage usage = withdrawUsage[token];
@@ -292,6 +333,37 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
             _hashTypedDataV4(
                 keccak256(abi.encode(REDEEM_QUOTE_TYPEHASH, quote))
             );
+    }
+
+    /// @notice Invalidates an unused trade or redemption quote ID without moving funds.
+    /// @dev Any current quote signer may cancel any ID, including another signer's quote.
+    function invalidateQuote(bytes32 quoteId) external nonReentrant onlyRole(QUOTE_SIGNER_ROLE) {
+        _invalidateQuote(quoteId);
+    }
+
+    /// @notice Invalidates a trade quote as its owner or as any current quote signer.
+    /// @dev Owners must supply a valid server signature from a currently authorized signer.
+    /// Signer callers need only the quote ID; the other fields and signature are not checked.
+    /// Cancellation does not depend on deadline, price validation, allowance or withdrawal limits.
+    function invalidateQuote(
+        TradeQuote calldata quote,
+        address quoteSigner,
+        bytes calldata quoteSignature
+    ) external nonReentrant {
+        address caller = _msgSender();
+        if (!hasRole(QUOTE_SIGNER_ROLE, caller)) {
+            if (caller != quote.owner) revert InvalidTradeOwner(quote.owner, caller);
+            _checkRole(QUOTE_SIGNER_ROLE, quoteSigner);
+            if (!_isValidSignature(quoteSigner, hashTradeQuote(quote), quoteSignature))
+                revert InvalidQuoteSignature(quoteSigner);
+        }
+        _invalidateQuote(quote.quoteId);
+    }
+
+    function _invalidateQuote(bytes32 quoteId) private {
+        if (consumed[quoteId]) revert QuoteAlreadyConsumed(quoteId);
+        consumed[quoteId] = true;
+        emit QuoteInvalidated(quoteId, _msgSender());
     }
 
     /// @notice Settles a quote with requiresBurn=false using the quoted tokens and Treasury buckets.
@@ -408,7 +480,9 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
         if (quote.requiresBurn != expectedBurn)
             revert InvalidBurnMode(expectedBurn, quote.requiresBurn);
         if (
+            quote.quoteId == bytes32(0) ||
             quote.owner == address(0) ||
+            quote.owner == address(this) ||
             quote.owner == address(treasury) ||
             quote.tokenIn.code.length == 0 ||
             quote.tokenOut.code.length == 0 ||
@@ -494,29 +568,29 @@ contract Controller is RoleRegistryClient, EIP712, ReentrancyGuard {
         if (!validated) revert PriceValidationFailed(validator);
     }
 
-    // Same EOA/ERC-1271 validation as CommodityToken; avoids dependencies requiring a newer EVM target.
+    // Accept ECDSA signatures regardless of account code, then fall back to ERC-1271.
     function _isValidSignature(
         address signer,
         bytes32 digest,
         bytes calldata signature
     ) private view returns (bool) {
         if (signer == address(0)) return false;
-        if (signer.code.length == 0) {
-            (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecover(
-                digest,
-                signature
-            );
-            return err == ECDSA.RecoverError.NoError && recovered == signer;
-        } else {
-            (bool success, bytes memory result) = signer.staticcall(
-                abi.encodeCall(IERC1271.isValidSignature, (digest, signature))
-            );
-            return
-                success &&
-                result.length >= 32 &&
-                abi.decode(result, (bytes32)) ==
-                bytes32(IERC1271.isValidSignature.selector);
+        (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecover(
+            digest,
+            signature
+        );
+        if (err == ECDSA.RecoverError.NoError && recovered == signer) {
+            return true;
         }
+
+        (bool success, bytes memory result) = signer.staticcall(
+            abi.encodeCall(IERC1271.isValidSignature, (digest, signature))
+        );
+        return
+            success &&
+            result.length >= 32 &&
+            abi.decode(result, (bytes32)) ==
+            bytes32(IERC1271.isValidSignature.selector);
     }
 
     function _settleTrade(

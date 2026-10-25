@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import {IPolicyRegistry} from "./IPolicyRegistry.sol";
 import {IRoleAdminPolicyRegistry} from "./IRoleAdminPolicyRegistry.sol";
+import {IRoleRegistryAwarePolicyRegistry} from "./IRoleRegistryAwarePolicyRegistry.sol";
+import {IRoleRegistry} from "../roleRegistry/IRoleRegistry.sol";
 import {RoleRegistryClient} from "../roleRegistry/RoleRegistryClient.sol";
 
 /// @title Shared B20-style allowlists, blocklists, and composite policies.
@@ -14,7 +16,7 @@ import {RoleRegistryClient} from "../roleRegistry/RoleRegistryClient.sol";
 /// in its dispatcher; exact precompile revert payloads/validation order are not promised.
 /// Unknown BLOCKLIST IDs authorize; unknown ALLOWLIST/composite/unsupported IDs deny.
 /// Always validate policyExists when binding a policy to a consumer.
-contract PolicyRegistry is IRoleAdminPolicyRegistry, RoleRegistryClient {
+contract PolicyRegistry is IRoleAdminPolicyRegistry, IRoleRegistryAwarePolicyRegistry, RoleRegistryClient {
     uint64 public constant ALWAYS_ALLOW = 0;
     uint64 public constant ALWAYS_BLOCK =
         (uint64(PolicyType.ALLOWLIST) << 56) | 1;
@@ -38,6 +40,13 @@ contract PolicyRegistry is IRoleAdminPolicyRegistry, RoleRegistryClient {
 
     /// @param registry RoleRegistry fixed at deployment and used for global role checks.
     constructor(address registry) RoleRegistryClient(registry) {}
+
+    /// @inheritdoc IRoleRegistryAwarePolicyRegistry
+    function roleRegistry()
+        public view override(RoleRegistryClient, IRoleRegistryAwarePolicyRegistry) returns (IRoleRegistry)
+    {
+        return super.roleRegistry();
+    }
 
     /// @inheritdoc IPolicyRegistry
     function createPolicy(

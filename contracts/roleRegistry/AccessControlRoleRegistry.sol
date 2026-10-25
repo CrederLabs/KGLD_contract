@@ -53,19 +53,12 @@ contract AccessControlRoleRegistry is AccessControl, IRoleRegistry {
     /// @notice The current administrator, updated atomically with its global membership.
     address private _defaultAdmin;
 
-    /// @notice Length of the acceptance window after the transfer delay, fixed at deployment.
-    uint256 public immutable defaultAdminAcceptanceWindow;
+    /// @notice Fixed delay before a nominated administrator can accept a transfer.
+    uint256 public constant DEFAULT_ADMIN_UPDATE_TIMELOCK = 2 days;
+    /// @notice Fixed duration available to accept after the transfer delay.
+    uint256 public constant DEFAULT_ADMIN_ACCEPTANCE_WINDOW = 3 days;
     /// @notice Latest transfer details; inspect newAdmin and finalized before treating it as pending.
     PendingDefaultAdminUpdate public pendingDefaultAdminUpdate;
-
-    /// @dev Stored base delay; use defaultAdminUpdateTimelock() to include a matured decrease.
-    uint256 private _defaultAdminUpdateTimelock;
-    /// @notice Scheduled replacement delay, which may be zero.
-    /// @dev This value alone does not indicate whether a change exists.
-    uint256 public pendingDefaultAdminUpdateTimelock;
-    /// @notice Timestamp when the replacement delay takes effect; zero means no scheduled change.
-    /// @dev A matured schedule remains stored until the next delay-setting call.
-    uint256 public pendingDefaultAdminUpdateTimelockValidAfter;
 
     /// @notice Emitted with the fixed acceptance interval [validAfter, validBefore).
     event DefaultAdminUpdateStaged(
@@ -81,12 +74,6 @@ contract AccessControlRoleRegistry is AccessControl, IRoleRegistry {
     );
     /// @notice Emitted when the current administrator clears an unfinalized reservation.
     event DefaultAdminUpdateCanceled(address indexed newAdmin);
-    /// @notice Emitted for both delayed decreases and immediate updates.
-    /// @dev For immediate updates, validAfter is the current block timestamp.
-    event DefaultAdminUpdateTimelockScheduled(
-        uint256 timelock,
-        uint256 validAfter
-    );
 
     /// @notice Ordinary grants cannot assign DEFAULT_ADMIN_ROLE.
     error DefaultAdminGrantForbidden();
@@ -100,8 +87,6 @@ contract AccessControlRoleRegistry is AccessControl, IRoleRegistry {
     error DefaultAdminRoleAdminChangeForbidden();
     /// @notice An administrator address or its storage scope is invalid.
     error InvalidDefaultAdmin(address account);
-    /// @notice The acceptance window must be greater than zero.
-    error InvalidAcceptanceWindow();
     /// @notice An unexpired, unfinalized reservation blocks staging another.
     error DefaultAdminUpdateAlreadyPending();
     /// @notice There is no reservation, or it was already finalized.
@@ -115,18 +100,10 @@ contract AccessControlRoleRegistry is AccessControl, IRoleRegistry {
 
     /// @notice Creates the registry with exactly one nonzero global administrator.
     /// @param initialAdmin Account receiving DEFAULT_ADMIN_ROLE immediately.
-    /// @param initialTimelock Initial transfer delay in seconds; zero is allowed.
-    /// @param acceptanceWindow Nonzero duration in seconds available to accept a transfer.
-    constructor(
-        address initialAdmin,
-        uint256 initialTimelock,
-        uint256 acceptanceWindow
-    ) {
+    /// @dev Transfer delay and acceptance window are fixed in code, not constructor inputs.
+    constructor(address initialAdmin) {
         if (initialAdmin == address(0))
             revert InvalidDefaultAdmin(initialAdmin);
-        if (acceptanceWindow == 0) revert InvalidAcceptanceWindow();
-        _defaultAdminUpdateTimelock = initialTimelock;
-        defaultAdminAcceptanceWindow = acceptanceWindow;
         _updateDefaultAdmin(initialAdmin);
     }
 
@@ -354,48 +331,17 @@ contract AccessControlRoleRegistry is AccessControl, IRoleRegistry {
         super._grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
     }
 
-    /// @notice Returns the effective delay, including a matured scheduled decrease.
-    /// @dev Maturation requires no transaction. Reading does not clear the schedule
-    /// or update the stored base delay. Existing transfer reservations are unaffected.
-    /// @return Current delay in seconds for newly staged administrator transfers.
-    function defaultAdminUpdateTimelock() public view returns (uint256) {
-        uint256 effectiveAt = pendingDefaultAdminUpdateTimelockValidAfter;
-        if (effectiveAt != 0 && block.timestamp >= effectiveAt) {
-            return pendingDefaultAdminUpdateTimelock;
-        }
-        return _defaultAdminUpdateTimelock;
+    /// @notice Returns the fixed two-day administrator transfer delay in seconds.
+    function defaultAdminUpdateTimelock() public pure returns (uint256) {
+        return DEFAULT_ADMIN_UPDATE_TIMELOCK;
     }
 
-    /// @notice Updates the transfer delay; decreases wait out the current effective delay.
-    /// @dev Only the default administrator may call this. Increases and equal values
-    /// apply immediately and clear a prior schedule. A decrease replaces any earlier
-    /// schedule and starts a fresh waiting period using the current effective delay.
-    /// Already staged transfer deadlines never change.
-    /// @param timelock New delay in seconds; zero is allowed.
-    function setDefaultAdminUpdateTimelock(
-        uint256 timelock
-    ) external onlyDefaultAdmin {
-        uint256 currentTimelock = defaultAdminUpdateTimelock();
-        // Materialize any matured decrease before replacing its schedule.
-        _defaultAdminUpdateTimelock = currentTimelock;
-        if (timelock < currentTimelock) {
-            pendingDefaultAdminUpdateTimelock = timelock;
-            pendingDefaultAdminUpdateTimelockValidAfter =
-                block.timestamp +
-                currentTimelock;
-            emit DefaultAdminUpdateTimelockScheduled(
-                timelock,
-                pendingDefaultAdminUpdateTimelockValidAfter
-            );
-        } else {
-            _defaultAdminUpdateTimelock = timelock;
-            delete pendingDefaultAdminUpdateTimelock;
-            delete pendingDefaultAdminUpdateTimelockValidAfter;
-            emit DefaultAdminUpdateTimelockScheduled(timelock, block.timestamp);
-        }
+    /// @notice Returns the fixed three-day acceptance window in seconds.
+    function defaultAdminAcceptanceWindow() public pure returns (uint256) {
+        return DEFAULT_ADMIN_ACCEPTANCE_WINDOW;
     }
 
-    /// @notice Reserves a transfer for the nominee to accept after the effective delay.
+    /// @notice Reserves a transfer for the nominee to accept after the fixed two-day delay.
     /// @dev Only the current administrator may stage. Unexpired, unfinalized
     /// reservations must first be canceled. Expired or finalized records may be
     /// replaced directly, with a fresh delay and acceptance window. Staging does
@@ -412,9 +358,9 @@ contract AccessControlRoleRegistry is AccessControl, IRoleRegistry {
             !pending.finalized &&
             block.timestamp < pending.validBefore
         ) revert DefaultAdminUpdateAlreadyPending();
-        // Snapshot both deadlines so later delay changes cannot alter this transfer.
+        // Acceptance is allowed from staging + 2 days (inclusive) to + 5 days (exclusive).
         uint256 validAfter = block.timestamp + defaultAdminUpdateTimelock();
-        uint256 validBefore = validAfter + defaultAdminAcceptanceWindow;
+        uint256 validBefore = validAfter + defaultAdminAcceptanceWindow();
         pendingDefaultAdminUpdate = PendingDefaultAdminUpdate(
             _defaultAdmin,
             newAdmin,

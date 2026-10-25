@@ -70,6 +70,11 @@
   },
   {
     "inputs": [],
+    "name": "EmptyLossBuckets",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "FailedCall",
     "type": "error"
   },
@@ -180,6 +185,11 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "InvalidPolicyAdminArguments",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -213,6 +223,27 @@
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "balance",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "allocated",
+        "type": "uint256"
+      }
+    ],
+    "name": "NoBackingDeficit",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "NoPendingUpgrade",
     "type": "error"
@@ -220,6 +251,17 @@
   {
     "inputs": [],
     "name": "NotInitializing",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint64",
+        "name": "policyId",
+        "type": "uint64"
+      }
+    ],
+    "name": "PolicyAdminMismatch",
     "type": "error"
   },
   {
@@ -325,6 +367,22 @@
         "type": "address"
       },
       {
+        "internalType": "uint256",
+        "name": "remainingDeficit",
+        "type": "uint256"
+      }
+    ],
+    "name": "UncoveredBackingDeficit",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
         "internalType": "address",
         "name": "account",
         "type": "address"
@@ -387,6 +445,11 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "ZeroAmount",
+    "type": "error"
+  },
+  {
     "anonymous": false,
     "inputs": [
       {
@@ -403,6 +466,68 @@
       }
     ],
     "name": "AllBucketsPolicyUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "oldAllocated",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newAllocated",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "operator",
+        "type": "address"
+      }
+    ],
+    "name": "BucketAllocatedRepaired",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "bucket",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "operator",
+        "type": "address"
+      }
+    ],
+    "name": "BucketAllocationWrittenOff",
     "type": "event"
   },
   {
@@ -1067,6 +1192,24 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "lossBuckets",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "emergencyRepairBucketAllocated",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "finalizeUpgrade",
     "outputs": [],
@@ -1243,6 +1386,16 @@
         "internalType": "uint64",
         "name": "policyId",
         "type": "uint64"
+      },
+      {
+        "internalType": "address",
+        "name": "expectedAdmin",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "expectedAdminRole",
+        "type": "bytes32"
       }
     ],
     "name": "setAllBucketsPolicy",
@@ -1261,6 +1414,16 @@
         "internalType": "uint64",
         "name": "policyId",
         "type": "uint64"
+      },
+      {
+        "internalType": "address",
+        "name": "expectedAdmin",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "expectedAdminRole",
+        "type": "bytes32"
       }
     ],
     "name": "setBucketDepositPolicy",
@@ -1279,6 +1442,16 @@
         "internalType": "uint64",
         "name": "policyId",
         "type": "uint64"
+      },
+      {
+        "internalType": "address",
+        "name": "expectedAdmin",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "expectedAdminRole",
+        "type": "bytes32"
       }
     ],
     "name": "setBucketWithdrawPolicy",
