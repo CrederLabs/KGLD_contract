@@ -2,6 +2,17 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "reinitializeConfigHash_",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "account",
         "type": "address"
@@ -342,6 +353,11 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "InvalidReinitializeConfig",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -433,6 +449,16 @@
   {
     "inputs": [],
     "name": "RoleRegistryAlreadyInitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TreasuryForcedTransferForbidden",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TreasuryFreezeForbidden",
     "type": "error"
   },
   {
@@ -1089,6 +1115,19 @@
   },
   {
     "inputs": [],
+    "name": "REINITIALIZE_CONFIG_HASH",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "TOKEN_RISK_MANAGER_ROLE",
     "outputs": [
       {
@@ -1142,6 +1181,19 @@
   {
     "inputs": [],
     "name": "TRANSFER_WITH_AUTHORIZATION_TYPEHASH",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "UNISSUED_KGLD",
     "outputs": [
       {
         "internalType": "bytes32",
@@ -1365,6 +1417,40 @@
       }
     ],
     "name": "canTransfer",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "executor",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "canTransferFor",
     "outputs": [
       {
         "internalType": "bool",
@@ -2408,11 +2494,6 @@
   },
   {
     "inputs": [
-      {
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
-      },
       {
         "internalType": "uint256",
         "name": "amount",

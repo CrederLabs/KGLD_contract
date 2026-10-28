@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC7943Fungible} from "./IERC7943Fungible.sol";
+import {ITreasury} from "./controller/ITreasury.sol";
 import {IPolicyRegistry} from "./policyRegistry/IPolicyRegistry.sol";
 import {
     RoleRegistryClientUpgradeable
@@ -115,6 +116,11 @@ contract CommodityToken is
 
     /// @notice Assigns an existing policy to a supported token scope.
     /// @dev Global or token-local TOKEN_RISK_MANAGER_ROLE holders may change bindings.
+    /// For policies other than registry built-ins, use the ID from a validated
+    /// PolicyCreated/RolePolicyCreated event in the registry's actual creation receipt,
+    /// or the return value of creation within the same transaction.
+    /// Never bind IDs predicted from counters or preassigned before creation.
+    /// Existence checks do not verify creation provenance, administrators or members.
     function updatePolicy(
         bytes32 policyScope,
         uint64 newPolicyId
@@ -195,6 +201,18 @@ contract CommodityToken is
     // ====================
     // Initializer
     // ====================
+    /// @notice Commits this implementation to the auditor-reviewed legacy migration config.
+    /// @dev keccak256(abi.encode(config)). Zero disables legacy reinitialize(), but
+    /// does not prevent initialize() on a new proxy or subsequent staged upgrades.
+    bytes32 public immutable REINITIALIZE_CONFIG_HASH;
+
+    error InvalidReinitializeConfig();
+
+    constructor(bytes32 reinitializeConfigHash_) {
+        REINITIALIZE_CONFIG_HASH = reinitializeConfigHash_;
+        _disableInitializers();
+    }
+
     function initialize(
         address initialAdmin,
         string memory _name,
@@ -246,6 +264,13 @@ contract CommodityToken is
     /// the implementation change. The legacy UPGRADER_ROLE authenticates this call;
     /// the new registries cannot authorize their own installation. Roles and policy
     /// members must be prepared externally, including legacy frozen accounts.
+    /// Except for registry built-ins, obtain policy IDs from validated
+    /// PolicyCreated/RolePolicyCreated events in actual creation receipts from
+    /// config.policyRegistry. Never predict or preassign these IDs; confirm them
+    /// before hashing config for REINITIALIZE_CONFIG_HASH and deploying the implementation.
+    /// The auditor must review the config committed by REINITIALIZE_CONFIG_HASH
+    /// before approving this implementation. A different config requires a new
+    /// implementation deployment and auditor approval.
     /// Existing ERC20, signature, pause and legacy audit state is left intact.
     /// Policy ID zero allows regular transfers but disables forced transfers;
     /// mintLimit remains zero on migration from the legacy implementation.
@@ -254,6 +279,11 @@ contract CommodityToken is
         ReinitializeConfig calldata config
     ) external onlyProxy reinitializer(2) {
         _checkLegacyUpgrader();
+
+        if (
+            REINITIALIZE_CONFIG_HASH == bytes32(0) ||
+            keccak256(abi.encode(config)) != REINITIALIZE_CONFIG_HASH
+        ) revert InvalidReinitializeConfig();
 
         __RoleRegistryClient_init(config.roleRegistry);
         if (
@@ -343,6 +373,9 @@ contract CommodityToken is
     bytes32 private constant TOKEN_FREEZE_STORAGE =
         0x948128671cbd67686407c2ceb5cb07a35e6cbff4315948f90f0e19c50345ad00;
 
+    error TreasuryFreezeForbidden();
+    error TreasuryForcedTransferForbidden();
+
     function supportsInterface(
         bytes4 interfaceId
     ) public pure override returns (bool) {
@@ -358,6 +391,7 @@ contract CommodityToken is
     }
 
     /// @notice Replaces the absolute frozen amount, including future holdings.
+    /// @dev The configured Treasury cannot be targeted, including with amount zero.
     function setFrozenTokens(
         address account,
         uint256 amount
@@ -376,16 +410,31 @@ contract CommodityToken is
 
     /// @dev Includes the caller's executor policy, but not ERC-20 allowance/balance validity.
     /// Zero-address sides follow the mint/burn exemptions used by _update.
+    /// Use canTransferFor to query on behalf of a different executor.
     function canTransfer(
         address from,
         address to,
         uint256 amount
     ) public view override returns (bool) {
+        return canTransferFor(_msgSender(), from, to, amount);
+    }
+
+    /// @notice Checks transfer compliance for the specified executor, regardless of the query caller.
+    /// @param executor The address that will directly call the token's transfer entry point.
+    /// @dev Includes pause, sender/receiver policies and frozen amounts. Does not
+    /// validate ERC-20 allowance, total balance sufficiency or address validity.
+    /// This is a query only; it grants no authority to execute a transfer.
+    function canTransferFor(
+        address executor,
+        address from,
+        address to,
+        uint256 amount
+    ) public view returns (bool) {
         if (paused()) return false;
         if (from != address(0) && !canSend(from)) return false;
         if (to != address(0) && !canReceive(to)) return false;
         if (
-            !_isTransferPolicyAuthorized(TRANSFER_EXECUTOR_POLICY, _msgSender())
+            !_isTransferPolicyAuthorized(TRANSFER_EXECUTOR_POLICY, executor)
         ) return false;
         if (from != address(0)) {
             uint256 balance = balanceOf(from);
@@ -399,6 +448,7 @@ contract CommodityToken is
     /// @notice Enforcement transfer: bypasses pause, regular sender/executor policy and allowance.
     /// @dev Requires nonzero source/receiver enforcement policies that authorize from/to.
     /// Regular receiver eligibility and ERC-20 address/balance checks remain mandatory.
+    /// The configured Treasury cannot be a source, regardless of enforcement policies.
     /// Unfreezes seized holdings before Transfer, then restores unused future freezing.
     /// Self transfers restore the original frozen amount; the recipient's freezing is unchanged.
     function forcedTransfer(
@@ -408,6 +458,7 @@ contract CommodityToken is
     ) external override onlyProxy onlyRole(TOKEN_RISK_MANAGER_ROLE) returns (bool) {
         if (from == address(0)) revert ERC20InvalidSender(from);
         if (to == address(0)) revert ERC20InvalidReceiver(to);
+        if (_isTreasury(from)) revert TreasuryForcedTransferForbidden();
         uint256 balance = balanceOf(from);
         if (amount > balance)
             revert ERC20InsufficientBalance(from, balance, amount);
@@ -457,15 +508,18 @@ contract CommodityToken is
     }
 
     function _setFrozenTokens(address account, uint256 amount) private {
+        if (_isTreasury(account)) revert TreasuryFreezeForbidden();
         _getCommodityTokenFreezeStorage().frozen[account] = amount;
         emit Frozen(account, amount);
     }
 
-    /// @dev Fail closed on missing policies, registry reverts, or malformed return data.
+    /// @dev Treasury is exempt from regular transfer policies. Other accounts fail
+    /// closed on missing policies, registry reverts, or malformed return data.
     function _isTransferPolicyAuthorized(
         bytes32 scope,
         address account
     ) private view returns (bool) {
+        if (_isTreasuryPolicyExempt(scope, account)) return true;
         uint64 id = _getCommodityTokenPolicyStorage().policyIds[scope];
         address registry = address(policyRegistry());
         if (
@@ -508,10 +562,30 @@ contract CommodityToken is
         bytes32 policyScope,
         address account
     ) private view {
+        if (_isTreasuryPolicyExempt(policyScope, account)) return;
         uint64 id = _getCommodityTokenPolicyStorage().policyIds[policyScope];
         // A Registry replacement must not silently allow an unknown BLOCKLIST ID.
         if (id != 0) _checkPolicyExists(id);
         _checkPolicy(id, account);
+    }
+
+    function _isTreasury(address account) private view returns (bool) {
+        return account != address(0) && account == treasury();
+    }
+
+    /// @dev Exempts only Treasury's own regular transfer/approval eligibility.
+    /// Counterparties, pause, roles, balances and enforcement policies still apply.
+    function _isTreasuryPolicyExempt(
+        bytes32 scope,
+        address account
+    ) private view returns (bool) {
+        if (!_isTreasury(account)) return false;
+        return
+            scope == TRANSFER_SENDER_POLICY ||
+            scope == TRANSFER_RECEIVER_POLICY ||
+            scope == TRANSFER_EXECUTOR_POLICY ||
+            scope == APPROVAL_OWNER_POLICY ||
+            scope == APPROVAL_SPENDER_POLICY;
     }
 
     function _checkForcedTransferPolicy(bytes32 policyScope, address account) private view {
@@ -610,21 +684,21 @@ contract CommodityToken is
 
     error InvalidSignature();
 
+    /// @dev Accept ECDSA regardless of account code, including EIP-7702 delegation,
+    /// then fall back to ERC-1271 when recovery fails or yields a different signer.
     function _checkSignature(address signer, bytes32 structHash, bytes memory signature) private view {
         if (signer == address(0)) revert InvalidSignature();
         bytes32 digest = _hashTypedDataV4(structHash);
-        if (signer.code.length == 0) {
-            (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecover(digest, signature);
-            if (err != ECDSA.RecoverError.NoError || recovered != signer) revert InvalidSignature();
-        } else {
-            // STATICCALL prevents the wallet from mutating token or wallet state during validation.
-            (bool success, bytes memory result) = signer.staticcall(
-                abi.encodeCall(IERC1271.isValidSignature, (digest, signature))
-            );
-            if (!success || result.length < 32 ||
-                abi.decode(result, (bytes32)) != bytes32(IERC1271.isValidSignature.selector)
-            ) revert InvalidSignature();
-        }
+        (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecover(digest, signature);
+        if (err == ECDSA.RecoverError.NoError && recovered == signer) return;
+
+        // STATICCALL prevents the wallet from mutating token or wallet state during validation.
+        (bool success, bytes memory result) = signer.staticcall(
+            abi.encodeCall(IERC1271.isValidSignature, (digest, signature))
+        );
+        if (!success || result.length < 32 ||
+            abi.decode(result, (bytes32)) != bytes32(IERC1271.isValidSignature.selector)
+        ) revert InvalidSignature();
     }
 
     function _checkAuthorizationAvailable(
@@ -714,14 +788,26 @@ contract CommodityToken is
     // Vault Mint
     // ====================
 
-    /// @notice Mints vault-backed tokens without consuming the bridge mint limit.
+    bytes32 public constant UNISSUED_KGLD = keccak256("UNISSUED_KGLD");
+
+    /// @notice Mints vault-backed tokens into Treasury's UNISSUED_KGLD bucket.
     /// @dev Assign VAULT_MINTER_ROLE to the multisig that authorizes vault issuance.
-    /// The common _mint hook enforces pause, receiver and executor policies.
-    function vaultMint(address to, uint256 amount)
+    /// The Token Proxy must hold TREASURY_MANAGER_ROLE for the configured Treasury.
+    /// Leave UNISSUED_KGLD's deposit policy at ID 0: Treasury automatically allows
+    /// deposits by managers without a separate policy membership grant. A nonzero
+    /// deposit policy, if configured later, still applies to the Token Proxy.
+    /// Mint to this proxy, approve only this deposit, then clear any allowance left.
+    /// Pause, transfer policies and frozen-balance checks still apply; the bridge
+    /// mint limit is not consumed. A failed deposit rolls back the entire issuance.
+    function vaultMint(uint256 amount)
         external onlyProxy onlyRole(VAULT_MINTER_ROLE)
     {
-        _mint(to, amount);
-        emit Minted(to, amount);
+        address treasuryAddress = treasury();
+        _mint(address(this), amount);
+        _approve(address(this), treasuryAddress, amount, false);
+        ITreasury(treasuryAddress).deposit(address(this), UNISSUED_KGLD, amount);
+        _approve(address(this), treasuryAddress, 0, false);
+        emit Minted(treasuryAddress, amount);
     }
 
     // ====================

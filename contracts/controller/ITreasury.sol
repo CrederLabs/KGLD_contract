@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @notice Treasury operations used by Controller trade settlement and redemption.
+/// @notice Treasury operations used by vault issuance, trade settlement and redemption.
 interface ITreasury {
     function deposit(address token, bytes32 bucket, uint256 amount) external;
 
